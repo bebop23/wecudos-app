@@ -812,6 +812,9 @@ Signup template
 *****/
 
 .sign-up{
+
+	text-align: center;
+
 	.img-cover{
 		position: absolute;
 	    top: 0;
@@ -820,10 +823,6 @@ Signup template
 	    background-image: url(/images/man-finishline.jpg);
 		background-size: cover;
 	}
-
-	.signup-header {
-		text-align: center;
-	} 
 
 	.sign-up-form {
 		padding:20px;
@@ -854,6 +853,7 @@ Signup template
 		.btn {
 			width: 100%;
 			background-color: $secondary-wecudos-color;
+			border-bottom-color: #230377;
 			color: white;
 			font-weight: bold;
 		}
@@ -866,6 +866,41 @@ Signup template
 	.input-group-addon {
 		background: $main-wecudos-color;
 	}
+
+	.divider {
+		padding: 1em;
+		font-size: 1.3em;
+	}
+
+	.fb-btn {
+		width: 40%;
+		color: white;
+		font-weight: bold;
+		border-bottom-color: #19356b;
+		background-color: #3b5998;
+		position: relative;
+	}
+
+	.icon-facebook {
+		background-image: url(/images/FB-f-Logo_white.png);
+		width: 25px;
+		height: 25px;
+		position: absolute;
+		top: 5px;
+		margin-left: -30px;
+	}
+
+	.btn{
+		text-shadow: none;
+		border-width: 0 0 2px 0;
+		-webkit-box-shadow: inset 0px 0px 0px 0px;
+		-moz-box-shadow: inset 0px 0px 0px 0px;
+		box-shadow: inset 0px 0px 0px 0px;
+		padding: 10px 20px 8px 20px;
+		font-weight: 500;
+		font-size: 1.15em;
+	}
+
 }
 
 
