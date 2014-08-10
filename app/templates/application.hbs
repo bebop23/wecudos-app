@@ -6,14 +6,16 @@
 		  	<a href="#"><img src="images/wecudos_logo_fade.png" alt="Wecudos" class="img-rounded wecudos-logo" border="0" height="50"></a>
 
 		  	<div class="wecudos-navbar-right">
-		      <a href="#"><img src="images/login-logo.jpg" alt="Wecudos" class="login-logo" border="0" height="50">LOGIN</a>
+			  	{{#link-to 'signup'}}
+			     <img src="images/login-logo.jpg" alt="Wecudos" class="login-logo" border="0" height="50">LOGIN
+			    {{/link-to}}
 		    </div>
 
 		  </div>
 		</nav>
 	</div>
 
-	<div id="content">
+	<div id="app-shell-content">
 		{{outlet}}
 	</div>
 

@@ -1,0 +1,34 @@
+<div class="triage">
+	<div class="container-fluid">
+		<div class="row">
+			<div class="col-sm-6 col-sm-offset-3">
+				
+				<div style="padding:10px 0 10px 0;">
+					<h2>How can we help you today?</h2>
+				</div>
+				<div class="input-group" style="width:100%;">
+					{{input placeholder="Please enter a statement of your goals." class='form-control' type='text'}}
+				</div>
+
+				<div class="divider"></div>
+
+				{{goal-selector index=1 goalType='Diet Goals'}}
+
+		        <div class="divider"></div>
+				
+				{{goal-selector index=2 goalType='Training Goals'}}
+
+				<div class="divider"></div>
+				{{goal-selector index=3 goalType='Injury Recovery Goals'}}
+
+				<div class="divider"></div>
+				{{goal-selector index=4 goalType='Mindfulness Goals'}}
+				
+				<div>
+					<h3>(Goal entry is optional)</h3>
+				</div>
+				{{outlet}}
+			</div>
+		</div>
+	</div>
+</div>

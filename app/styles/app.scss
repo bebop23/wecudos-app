@@ -38,8 +38,9 @@ h1 {
 }
 #header {
 }
-#content {
-	padding-bottom:100px; /* Height of the footer element */
+#app-shell-content {
+	padding-bottom:150px; /* Height of the footer element */
+	padding-top:50px;
 }
 #footer {
 	background: $main-wecudos-color;
@@ -377,6 +378,11 @@ h1 {
 @media (min-width: $screen-sm-min) { 
 	h1 {
 		font-size:30px;
+	}
+
+	#app-shell-content {
+		padding-bottom:100px; /* Height of the footer element */
+		padding-top:50px;
 	}
 
 	.resp-text-header {
@@ -903,4 +909,87 @@ Signup template
 
 }
 
+
+.triage {
+
+	text-align: center;
+
+	.divider {
+		height:30px;
+	}
+
+}
+
+/**
+	START: goal-selector classes
+*/
+.goal-container{
+
+  background-color: #410a94;
+  height: 80px;
+  width:90%;
+  color: white;
+  text-decoration:none;
+  font-size: 1.7em;
+  font-weight:bold;
+  border-radius: 8px 0 0 8px;
+  -webkit-border-radius: 8px 0 0 8px;
+  position:relative;
+  border:1px solid #666;
+  border-right:0;
+  cursor: pointer;
+  
+  -webkit-transform-style: preserve-3d;
+  -moz-transform-style: preserve-3d;
+  transform-style: preserve-3d;
+
+  	.goal-content {
+		position: relative;
+		top: 50%;
+		transform: translateY(-50%);
+
+		padding-left:20px;
+	}
+
+	.bar{
+	  content: '';
+	  border: 1px solid #666;
+	  position: absolute;
+	  height: 100%;
+	  left: 50px;
+	}
+
+	.goal-index{
+		float:left;
+	}
+	.goal-category{
+		margin-left:50px;
+		text-align: left;
+	}
+}
+
+.goal-container:after {
+  content:"";
+  width:56px;
+  height:56px;
+  background-color: #410a94;
+  -moz-transform: rotate(45deg);
+  -webkit-transform: rotate(45deg);
+  display:block;
+  position:absolute;
+  top:11px;
+  right: -28px;
+  z-index:-1;
+  border:1px solid  #666;
+  border-left: 0;
+  border-bottom: 0;
+}
+
+.has-fields{
+	color: $main-wecudos-color;
+}
+
+/**
+	END: goal-selector classes
+*/
 

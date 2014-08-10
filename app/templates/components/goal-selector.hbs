@@ -1,0 +1,18 @@
+<div class="bar"></div>
+<div class='goal-content'>
+<div class='goal-index'>
+	{{#if hasFields}}
+	<!-- Check mark -->
+		&#10003; 
+	{{else}}
+		{{index}}
+	{{/if}}
+</div>
+<div class='goal-category'>
+	{{#if hasFields}}
+		{{goalType}} Entered
+	{{else}}
+		Enter {{goalType}}
+	{{/if}}
+</div>
+</div>

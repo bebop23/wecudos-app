@@ -5,7 +5,11 @@ var Router = Ember.Router.extend({
 });
 
 Router.map(function() {
-	this.route("signup", {path: "/signup"});
+	this.route("signup");
+	this.resource("triage", function(){
+		this.route('diet');
+	});
+
 });
 
 export default Router;
