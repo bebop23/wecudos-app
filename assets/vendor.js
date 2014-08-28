@@ -57887,82 +57887,114 @@ define("ember/load-initializers",
 );
 })();
 
-;/*!
- * @overview  Ember Data
- * @copyright Copyright 2011-2014 Tilde Inc. and contributors.
- *            Portions Copyright 2011 LivingSocial Inc.
- * @license   Licensed under MIT license (see license.js)
- * @version   1.0.0-beta.8.2a68c63a
- */
-(function(global) {
+;(function(global){
 var define, requireModule, require, requirejs;
 
 (function() {
-  var registry = {}, seen = {};
+  var registry = {}, seen = {}, state = {};
+  var FAILED = false;
 
   define = function(name, deps, callback) {
-    registry[name] = { deps: deps, callback: callback };
+    registry[name] = {
+      deps: deps,
+      callback: callback
+    };
   };
 
-  requirejs = require = requireModule = function(name) {
-  requirejs._eak_seen = registry;
+  function reify(deps, name, seen) {
+    var length = deps.length;
+    var reified = new Array(length);
+    var dep;
+    var exports;
 
-    if (seen[name]) { return seen[name]; }
-    seen[name] = {};
+    for (var i = 0, l = length; i < l; i++) {
+      dep = deps[i];
+      if (dep === 'exports') {
+        exports = reified[i] = seen;
+      } else {
+        reified[i] = require(resolve(dep, name));
+      }
+    }
+
+    return {
+      deps: reified,
+      exports: exports
+    };
+  }
+
+  requirejs = require = requireModule = function(name) {
+    if (state[name] !== FAILED &&
+        seen.hasOwnProperty(name)) {
+      return seen[name];
+    }
 
     if (!registry[name]) {
-      throw new Error("Could not find module " + name);
+      throw new Error('Could not find module ' + name);
     }
 
-    var mod = registry[name],
-        deps = mod.deps,
-        callback = mod.callback,
-        reified = [],
-        exports;
+    var mod = registry[name];
+    var reified;
+    var module;
+    var loaded = false;
 
-    for (var i=0, l=deps.length; i<l; i++) {
-      if (deps[i] === 'exports') {
-        reified.push(exports = {});
-      } else {
-        reified.push(requireModule(resolve(deps[i])));
+    seen[name] = { }; // placeholder for run-time cycles
+
+    try {
+      reified = reify(mod.deps, name, seen[name]);
+      module = mod.callback.apply(this, reified.deps);
+      loaded = true;
+    } finally {
+      if (!loaded) {
+        state[name] = FAILED;
       }
     }
 
-    var value = callback.apply(this, reified);
-    return seen[name] = exports || value;
+    return reified.exports ? seen[name] : (seen[name] = module);
+  };
 
-    function resolve(child) {
-      if (child.charAt(0) !== '.') { return child; }
-      var parts = child.split("/");
-      var parentBase = name.split("/").slice(0, -1);
+  function resolve(child, name) {
+    if (child.charAt(0) !== '.') { return child; }
 
-      for (var i=0, l=parts.length; i<l; i++) {
-        var part = parts[i];
+    var parts = child.split('/');
+    var nameParts = name.split('/');
+    var parentBase;
 
-        if (part === '..') { parentBase.pop(); }
-        else if (part === '.') { continue; }
-        else { parentBase.push(part); }
-      }
-
-      return parentBase.join("/");
+    if (nameParts.length === 1) {
+      parentBase = nameParts;
+    } else {
+      parentBase = nameParts.slice(0, -1);
     }
+
+    for (var i = 0, l = parts.length; i < l; i++) {
+      var part = parts[i];
+
+      if (part === '..') { parentBase.pop(); }
+      else if (part === '.') { continue; }
+      else { parentBase.push(part); }
+    }
+
+    return parentBase.join('/');
+  }
+
+  requirejs.entries = requirejs._eak_seen = registry;
+  requirejs.clear = function(){
+    requirejs.entries = requirejs._eak_seen = registry = {};
+    seen = state = {};
   };
 })();
 
-define("activemodel-adapter/lib/main", 
-  ["./system","exports"],
+define("activemodel-adapter",
+  ["activemodel-adapter/system","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var ActiveModelAdapter = __dependency1__.ActiveModelAdapter;
     var ActiveModelSerializer = __dependency1__.ActiveModelSerializer;
-    var EmbeddedRecordsMixin = __dependency1__.EmbeddedRecordsMixin;
 
     __exports__.ActiveModelAdapter = ActiveModelAdapter;
     __exports__.ActiveModelSerializer = ActiveModelSerializer;
-    __exports__.EmbeddedRecordsMixin = EmbeddedRecordsMixin;
   });
-define("activemodel-adapter/lib/setup-container", 
-  ["../../ember-data/lib/system/container_proxy","./system/active_model_serializer","./system/active_model_adapter","exports"],
+define("activemodel-adapter/setup-container",
+  ["ember-data/system/container_proxy","activemodel-adapter/system/active_model_serializer","activemodel-adapter/system/active_model_adapter","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
     "use strict";
     var ContainerProxy = __dependency1__["default"];
@@ -57972,35 +58004,32 @@ define("activemodel-adapter/lib/setup-container",
     __exports__["default"] = function setupActiveModelAdapter(container, application){
       var proxy = new ContainerProxy(container);
       proxy.registerDeprecations([
-        {deprecated: 'serializer:_ams',  valid: 'serializer:-active-model'},
-        {deprecated: 'adapter:_ams',     valid: 'adapter:-active-model'}
+        { deprecated: 'serializer:_ams',  valid: 'serializer:-active-model' },
+        { deprecated: 'adapter:_ams',     valid: 'adapter:-active-model' }
       ]);
 
       container.register('serializer:-active-model', ActiveModelSerializer);
       container.register('adapter:-active-model', ActiveModelAdapter);
     };
   });
-define("activemodel-adapter/lib/system", 
-  ["./system/embedded_records_mixin","./system/active_model_adapter","./system/active_model_serializer","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
+define("activemodel-adapter/system",
+  ["activemodel-adapter/system/active_model_adapter","activemodel-adapter/system/active_model_serializer","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
-    var EmbeddedRecordsMixin = __dependency1__["default"];
-    var ActiveModelAdapter = __dependency2__["default"];
-    var ActiveModelSerializer = __dependency3__["default"];
+    var ActiveModelAdapter = __dependency1__["default"];
+    var ActiveModelSerializer = __dependency2__["default"];
 
-    __exports__.EmbeddedRecordsMixin = EmbeddedRecordsMixin;
     __exports__.ActiveModelAdapter = ActiveModelAdapter;
     __exports__.ActiveModelSerializer = ActiveModelSerializer;
   });
-define("activemodel-adapter/lib/system/active_model_adapter", 
-  ["../../../ember-data/lib/adapters","../../../ember-data/lib/system/adapter","../../../ember-inflector/lib/main","./active_model_serializer","./embedded_records_mixin","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
+define("activemodel-adapter/system/active_model_adapter",
+  ["ember-data/adapters","ember-data/system/adapter","ember-inflector","activemodel-adapter/system/active_model_serializer","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
     var RESTAdapter = __dependency1__.RESTAdapter;
     var InvalidError = __dependency2__.InvalidError;
     var pluralize = __dependency3__.pluralize;
     var ActiveModelSerializer = __dependency4__["default"];
-    var EmbeddedRecordsMixin = __dependency5__["default"];
 
     /**
       @module ember-data
@@ -58027,6 +58056,10 @@ define("activemodel-adapter/lib/system/active_model_adapter",
       The ActiveModelAdapter expects the JSON returned from your server to follow
       the REST adapter conventions substituting underscored keys for camelcased ones.
 
+      Unlike the DS.RESTAdapter, async relationship keys must be the singular form
+      of the relationship name, followed by "_id" for DS.belongsTo relationships,
+      or "_ids" for DS.hasMany relationships.
+
       ### Conventional Names
 
       Attribute names in your JSON payload should be the underscored versions of
@@ -58047,10 +58080,47 @@ define("activemodel-adapter/lib/system/active_model_adapter",
       ```js
       {
         "famous_person": {
+          "id": 1,
           "first_name": "Barack",
           "last_name": "Obama",
           "occupation": "President"
         }
+      }
+      ```
+
+      Let's imagine that `Occupation` is just another model:
+
+      ```js
+      App.Person = DS.Model.extend({
+        firstName: DS.attr('string'),
+        lastName: DS.attr('string'),
+        occupation: DS.belongsTo('occupation')
+      });
+
+      App.Occupation = DS.Model.extend({
+        name: DS.attr('string'),
+        salary: DS.attr('number'),
+        people: DS.hasMany('person')
+      });
+      ```
+
+      The JSON needed to avoid extra server calls, should look like this:
+
+      ```js
+      {
+        "people": [{
+          "id": 1,
+          "first_name": "Barack",
+          "last_name": "Obama",
+          "occupation_id": 1
+        }],
+
+        "occupations": [{
+          "id": 1,
+          "name": "President",
+          "salary": 100000,
+          "person_ids": [1]
+        }]
       }
       ```
 
@@ -58121,8 +58191,8 @@ define("activemodel-adapter/lib/system/active_model_adapter",
 
     __exports__["default"] = ActiveModelAdapter;
   });
-define("activemodel-adapter/lib/system/active_model_serializer", 
-  ["../../../ember-inflector/lib/main","../../../ember-data/lib/serializers/rest_serializer","exports"],
+define("activemodel-adapter/system/active_model_serializer",
+  ["ember-inflector","ember-data/serializers/rest_serializer","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     var singularize = __dependency1__.singularize;
@@ -58176,10 +58246,47 @@ define("activemodel-adapter/lib/system/active_model_serializer",
       ```js
       {
         "famous_person": {
+          "id": 1,
           "first_name": "Barack",
           "last_name": "Obama",
           "occupation": "President"
         }
+      }
+      ```
+
+      Let's imagine that `Occupation` is just another model:
+
+      ```js
+      App.Person = DS.Model.extend({
+        firstName: DS.attr('string'),
+        lastName: DS.attr('string'),
+        occupation: DS.belongsTo('occupation')
+      });
+
+      App.Occupation = DS.Model.extend({
+        name: DS.attr('string'),
+        salary: DS.attr('number'),
+        people: DS.hasMany('person')
+      });
+      ```
+
+      The JSON needed to avoid extra server calls, should look like this:
+
+      ```js
+      {
+        "people": [{
+          "id": 1,
+          "first_name": "Barack",
+          "last_name": "Obama",
+          "occupation_id": 1
+        }],
+
+        "occupations": [{
+          "id": 1,
+          "name": "President",
+          "salary": 100000,
+          "person_ids": [1]
+        }]
       }
       ```
 
@@ -58210,8 +58317,8 @@ define("activemodel-adapter/lib/system/active_model_serializer",
         @param {String} kind
         @return String
       */
-      keyForRelationship: function(key, kind) {
-        key = decamelize(key);
+      keyForRelationship: function(rawKey, kind) {
+        var key = decamelize(rawKey);
         if (kind === "belongsTo") {
           return key + "_id";
         } else if (kind === "hasMany") {
@@ -58249,12 +58356,14 @@ define("activemodel-adapter/lib/system/active_model_serializer",
         @param relationship
       */
       serializePolymorphicType: function(record, json, relationship) {
-        var key = relationship.key,
-            belongsTo = get(record, key);
+        var key = relationship.key;
+        var belongsTo = get(record, key);
+        var jsonKey = underscore(key + "_type");
 
-        if (belongsTo) {
-          key = this.keyForAttribute(key);
-          json[key + "_type"] = capitalize(belongsTo.constructor.typeKey);
+        if (Ember.isNone(belongsTo)) {
+          json[jsonKey] = null;
+        } else {
+          json[jsonKey] = capitalize(camelize(belongsTo.constructor.typeKey));
         }
       },
 
@@ -58345,10 +58454,10 @@ define("activemodel-adapter/lib/system/active_model_serializer",
         @private
       */
       normalizeRelationships: function(type, hash) {
-        var payloadKey, payload;
 
         if (this.keyForRelationship) {
           type.eachRelationship(function(key, relationship) {
+            var payloadKey, payload;
             if (relationship.options.polymorphic) {
               payloadKey = this.keyForAttribute(key);
               payload = hash[payloadKey];
@@ -58362,6 +58471,7 @@ define("activemodel-adapter/lib/system/active_model_serializer",
               }
             } else {
               payloadKey = this.keyForRelationship(key, relationship.kind);
+              if (!hash.hasOwnProperty(payloadKey)) { return; }
               payload = hash[payloadKey];
             }
 
@@ -58377,553 +58487,123 @@ define("activemodel-adapter/lib/system/active_model_serializer",
 
     __exports__["default"] = ActiveModelSerializer;
   });
-define("activemodel-adapter/lib/system/embedded_records_mixin", 
-  ["../../../ember-inflector/lib/main","exports"],
-  function(__dependency1__, __exports__) {
+define("ember-data",
+  ["ember-data/core","ember-data/ext/date","ember-data/system/store","ember-data/system/model","ember-data/system/changes","ember-data/system/adapter","ember-data/system/debug","ember-data/system/record_arrays","ember-data/system/record_array_manager","ember-data/adapters","ember-data/serializers/json_serializer","ember-data/serializers/rest_serializer","ember-inflector","ember-data/serializers/embedded_records_mixin","activemodel-adapter","ember-data/transforms","ember-data/system/relationships","ember-data/ember-initializer","ember-data/setup-container","ember-data/system/container_proxy","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __dependency9__, __dependency10__, __dependency11__, __dependency12__, __dependency13__, __dependency14__, __dependency15__, __dependency16__, __dependency17__, __dependency18__, __dependency19__, __dependency20__, __exports__) {
     "use strict";
-    var get = Ember.get;
-    var forEach = Ember.EnumerableUtils.forEach;
-    var camelize = Ember.String.camelize;
-
-    var pluralize = __dependency1__.pluralize;
-
     /**
-      ## Using Embedded Records
+      Ember Data
 
-      `DS.EmbeddedRecordsMixin` supports serializing embedded records.
-
-      To set up embedded records, include the mixin when extending a serializer
-      then define and configure embedded (model) relationships.
-
-      Below is an example of a per-type serializer ('post' type).
-
-      ```js
-      App.PostSerializer = DS.ActiveModelSerializer.extend(DS.EmbeddedRecordsMixin, {
-        attrs: {
-          author: {embedded: 'always'},
-          comments: {serialize: 'ids'}
-        }
-      })
-      ```
-
-      The `attrs` option for a resource `{embedded: 'always'}` is shorthand for:
-
-      ```js
-      {serialize: 'records', deserialize: 'records'}
-      ```
-
-      ### Configuring Attrs
-
-      A resource's `attrs` option may be set to use `ids`, `records` or `no` for the
-      `serialize`  and `deserialize` settings.
-
-      The `attrs` property can be set on the ApplicationSerializer or a per-type
-      serializer.
-
-      In the case where embedded JSON is expected while extracting a payoad (reading)
-      the setting is `deserialize: 'records'`, there is no need to use `ids` when
-      extracting as that is the default behavior without this mixin if you are using
-      the vanilla ActiveModelAdapter. Likewise, to embed JSON in the payload while
-      serializing `serialize: 'records'` is the setting to use. There is an option of
-      not embedding JSON in the serialized payload by using `serialize: 'ids'`. If you
-      do not want the relationship sent at all, you can use `serialize: 'no'`.
-
-
-      ### ActiveModelSerializer defaults
-      If you do not overwrite `attrs` for a specific relationship, the `ActiveModelSerializer`
-      will behave in the following way:
-
-      BelongsTo: `{serialize:'id', deserialize:'id'}`
-      HasMany:   `{serialize:no,  deserialize:'ids'}`
-
-      ### Model Relationships
-
-      Embedded records must have a model defined to be extracted and serialized.
-
-      To successfully extract and serialize embedded records the model relationships
-      must be setup correcty See the
-      [defining relationships](/guides/models/defining-models/#toc_defining-relationships)
-      section of the **Defining Models** guide page.
-
-      Records without an `id` property are not considered embedded records, model
-      instances must have an `id` property to be used with Ember Data.
-
-      ### Example JSON payloads, Models and Serializers
-
-      **When customizing a serializer it is imporant to grok what the cusomizations
-      are, please read the docs for the methods this mixin provides, in case you need
-      to modify to fit your specific needs.**
-
-      For example review the docs for each method of this mixin:
-
-      * [extractArray](/api/data/classes/DS.EmbeddedRecordsMixin.html#method_extractArray)
-      * [extractSingle](/api/data/classes/DS.EmbeddedRecordsMixin.html#method_extractSingle)
-      * [serializeBelongsTo](/api/data/classes/DS.EmbeddedRecordsMixin.html#method_serializeBelongsTo)
-      * [serializeHasMany](/api/data/classes/DS.EmbeddedRecordsMixin.html#method_serializeHasMany)
-
-      @class EmbeddedRecordsMixin
-      @namespace DS
+      @module ember-data
+      @main ember-data
     */
-    var EmbeddedRecordsMixin = Ember.Mixin.create({
 
-      /**
-        Serialize `belongsTo` relationship when it is configured as an embedded object.
+    // support RSVP 2.x via resolve,  but prefer RSVP 3.x's Promise.cast
+    Ember.RSVP.Promise.cast = Ember.RSVP.Promise.cast || Ember.RSVP.resolve;
 
-        This example of an author model belongs to a post model:
+    var DS = __dependency1__["default"];
 
-        ```js
-        Post = DS.Model.extend({
-          title:    DS.attr('string'),
-          body:     DS.attr('string'),
-          author:   DS.belongsTo('author')
-        });
+    var Store = __dependency3__.Store;
+    var PromiseArray = __dependency3__.PromiseArray;
+    var PromiseObject = __dependency3__.PromiseObject;
+    var Model = __dependency4__.Model;
+    var Errors = __dependency4__.Errors;
+    var RootState = __dependency4__.RootState;
+    var attr = __dependency4__.attr;
+    var AttributeChange = __dependency5__.AttributeChange;
+    var RelationshipChange = __dependency5__.RelationshipChange;
+    var RelationshipChangeAdd = __dependency5__.RelationshipChangeAdd;
+    var RelationshipChangeRemove = __dependency5__.RelationshipChangeRemove;
+    var OneToManyChange = __dependency5__.OneToManyChange;
+    var ManyToNoneChange = __dependency5__.ManyToNoneChange;
+    var OneToOneChange = __dependency5__.OneToOneChange;
+    var ManyToManyChange = __dependency5__.ManyToManyChange;
+    var InvalidError = __dependency6__.InvalidError;
+    var Adapter = __dependency6__.Adapter;
+    var DebugAdapter = __dependency7__["default"];
+    var RecordArray = __dependency8__.RecordArray;
+    var FilteredRecordArray = __dependency8__.FilteredRecordArray;
+    var AdapterPopulatedRecordArray = __dependency8__.AdapterPopulatedRecordArray;
+    var ManyArray = __dependency8__.ManyArray;
+    var RecordArrayManager = __dependency9__["default"];
+    var RESTAdapter = __dependency10__.RESTAdapter;
+    var FixtureAdapter = __dependency10__.FixtureAdapter;
+    var JSONSerializer = __dependency11__["default"];
+    var RESTSerializer = __dependency12__["default"];
+    var EmbeddedRecordsMixin = __dependency14__["default"];
+    var ActiveModelAdapter = __dependency15__.ActiveModelAdapter;
+    var ActiveModelSerializer = __dependency15__.ActiveModelSerializer;
 
-        Author = DS.Model.extend({
-          name:     DS.attr('string'),
-          post:     DS.belongsTo('post')
-        });
-        ```
+    var Transform = __dependency16__.Transform;
+    var DateTransform = __dependency16__.DateTransform;
+    var NumberTransform = __dependency16__.NumberTransform;
+    var StringTransform = __dependency16__.StringTransform;
+    var BooleanTransform = __dependency16__.BooleanTransform;
 
-        Use a custom (type) serializer for the post model to configure embedded author
+    var hasMany = __dependency17__.hasMany;
+    var belongsTo = __dependency17__.belongsTo;
+    var setupContainer = __dependency19__["default"];
 
-        ```js
-        App.PostSerializer = DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
-          attrs: {
-            author: {embedded: 'always'}
-          }
-        })
-        ```
+    var ContainerProxy = __dependency20__["default"];
 
-        A payload with an attribute configured for embedded records can serialize
-        the records together under the root attribute's payload:
+    DS.Store         = Store;
+    DS.PromiseArray  = PromiseArray;
+    DS.PromiseObject = PromiseObject;
 
-        ```js
-        {
-          "post": {
-            "id": "1"
-            "title": "Rails is omakase",
-            "author": {
-              "id": "2"
-              "name": "dhh"
-            }
-          }
-        }
-        ```
+    DS.Model     = Model;
+    DS.RootState = RootState;
+    DS.attr      = attr;
+    DS.Errors    = Errors;
 
-        @method serializeBelongsTo
-        @param {DS.Model} record
-        @param {Object} json
-        @param {Object} relationship
-      */
-      serializeBelongsTo: function(record, json, relationship) {
-        var attr = relationship.key;
-        var attrs = this.get('attrs');
-        if (noSerializeOptionSpecified(attrs, attr)) {
-          this._super(record, json, relationship);
-          return;
-        }
-        var includeIds = hasSerializeIdsOption(attrs, attr);
-        var includeRecords = hasSerializeRecordsOption(attrs, attr);
-        var embeddedRecord = record.get(attr);
-        if (includeIds) {
-          key = this.keyForRelationship(attr, relationship.kind);
-          if (!embeddedRecord) {
-            json[key] = null;
-          } else {
-            json[key] = get(embeddedRecord, 'id');
-          }
-        } else if (includeRecords) {
-          var key = this.keyForRelationship(attr);
-          if (!embeddedRecord) {
-            json[key] = null;
-          } else {
-            json[key] = embeddedRecord.serialize({includeId: true});
-            this.removeEmbeddedForeignKey(record, embeddedRecord, relationship, json[key]);
-          }
-        }
-      },
+    DS.AttributeChange       = AttributeChange;
+    DS.RelationshipChange    = RelationshipChange;
+    DS.RelationshipChangeAdd = RelationshipChangeAdd;
+    DS.OneToManyChange       = OneToManyChange;
+    DS.ManyToNoneChange      = OneToManyChange;
+    DS.OneToOneChange        = OneToOneChange;
+    DS.ManyToManyChange      = ManyToManyChange;
 
-      /**
-        Serialize `hasMany` relationship when it is configured as embedded objects.
+    DS.Adapter      = Adapter;
+    DS.InvalidError = InvalidError;
 
-        This example of a post model has many comments:
+    DS.DebugAdapter = DebugAdapter;
 
-        ```js
-        Post = DS.Model.extend({
-          title:    DS.attr('string'),
-          body:     DS.attr('string'),
-          comments: DS.hasMany('comment')
-        });
+    DS.RecordArray                 = RecordArray;
+    DS.FilteredRecordArray         = FilteredRecordArray;
+    DS.AdapterPopulatedRecordArray = AdapterPopulatedRecordArray;
+    DS.ManyArray                   = ManyArray;
 
-        Comment = DS.Model.extend({
-          body:     DS.attr('string'),
-          post:     DS.belongsTo('post')
-        });
-        ```
+    DS.RecordArrayManager = RecordArrayManager;
 
-        Use a custom (type) serializer for the post model to configure embedded comments
+    DS.RESTAdapter    = RESTAdapter;
+    DS.FixtureAdapter = FixtureAdapter;
 
-        ```js
-        App.PostSerializer = DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
-          attrs: {
-            comments: {embedded: 'always'}
-          }
-        })
-        ```
+    DS.RESTSerializer = RESTSerializer;
+    DS.JSONSerializer = JSONSerializer;
 
-        A payload with an attribute configured for embedded records can serialize
-        the records together under the root attribute's payload:
+    DS.Transform       = Transform;
+    DS.DateTransform   = DateTransform;
+    DS.StringTransform = StringTransform;
+    DS.NumberTransform = NumberTransform;
+    DS.BooleanTransform = BooleanTransform;
 
-        ```js
-        {
-          "post": {
-            "id": "1"
-            "title": "Rails is omakase",
-            "body": "I want this for my ORM, I want that for my template language..."
-            "comments": [{
-              "id": "1",
-              "body": "Rails is unagi"
-            }, {
-              "id": "2",
-              "body": "Omakase O_o"
-            }]
-          }
-        }
-        ```
+    DS.ActiveModelAdapter    = ActiveModelAdapter;
+    DS.ActiveModelSerializer = ActiveModelSerializer;
+    DS.EmbeddedRecordsMixin  = EmbeddedRecordsMixin;
 
-        The attrs options object can use more specific instruction for extracting and
-        serializing. When serializing, an option to embed `ids` or `records` can be set.
-        When extracting the only option is `records`.
+    DS.belongsTo = belongsTo;
+    DS.hasMany   = hasMany;
 
-        So `{embedded: 'always'}` is shorthand for:
-        `{serialize: 'records', deserialize: 'records'}`
+    DS.ContainerProxy = ContainerProxy;
 
-        To embed the `ids` for a related object (using a hasMany relationship):
+    DS._setupContainer = setupContainer;
 
-        ```js
-        App.PostSerializer = DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
-          attrs: {
-            comments: {serialize: 'ids', deserialize: 'records'}
-          }
-        })
-        ```
+    Ember.lookup.DS = DS;
 
-        ```js
-        {
-          "post": {
-            "id": "1"
-            "title": "Rails is omakase",
-            "body": "I want this for my ORM, I want that for my template language..."
-            "comments": ["1", "2"]
-          }
-        }
-        ```
-
-        @method serializeHasMany
-        @param {DS.Model} record
-        @param {Object} json
-        @param {Object} relationship
-      */
-      serializeHasMany: function(record, json, relationship) {
-        var attr = relationship.key;
-        var attrs = this.get('attrs');
-        if (noSerializeOptionSpecified(attrs, attr)) {
-          this._super(record, json, relationship);
-          return;
-        }
-        var includeIds = hasSerializeIdsOption(attrs, attr);
-        var includeRecords = hasSerializeRecordsOption(attrs, attr);
-        var key;
-        if (includeIds) {
-          key = this.keyForRelationship(attr, relationship.kind);
-          json[key] = get(record, attr).mapBy('id');
-        } else if (includeRecords) {
-          key = this.keyForAttribute(attr);
-          json[key] = get(record, attr).map(function(embeddedRecord) {
-            var serializedEmbeddedRecord = embeddedRecord.serialize({includeId: true});
-            this.removeEmbeddedForeignKey(record, embeddedRecord, relationship, serializedEmbeddedRecord);
-            return serializedEmbeddedRecord;
-          }, this);
-        }
-      },
-
-      /**
-        When serializing an embedded record, modify the property (in the json payload)
-        that refers to the parent record (foreign key for relationship).
-
-        Serializing a `belongsTo` relationship removes the property that refers to the
-        parent record
-
-        Serializing a `hasMany` relationship does not remove the property that refers to
-        the parent record.
-
-        @method removeEmbeddedForeignKey
-        @param {DS.Model} record
-        @param {DS.Model} embeddedRecord
-        @param {Object} relationship
-        @param {Object} json
-      */
-      removeEmbeddedForeignKey: function (record, embeddedRecord, relationship, json) {
-        if (relationship.kind === 'hasMany') {
-          return;
-        } else if (relationship.kind === 'belongsTo') {
-          var parentRecord = record.constructor.inverseFor(relationship.key);
-          if (parentRecord) {
-            var name = parentRecord.name;
-            var embeddedSerializer = this.store.serializerFor(embeddedRecord.constructor);
-            var parentKey = embeddedSerializer.keyForRelationship(name, parentRecord.kind);
-            if (parentKey) {
-              delete json[parentKey];
-            }
-          }
-        }
-      },
-
-      /**
-        Extract an embedded object from the payload for a single object
-        and add the object in the compound document (side-loaded) format instead.
-
-        A payload with an attribute configured for embedded records needs to be extracted:
-
-        ```js
-        {
-          "post": {
-            "id": 1
-            "title": "Rails is omakase",
-            "author": {
-              "id": 2
-              "name": "dhh"
-            }
-            "comments": []
-          }
-        }
-        ```
-
-        Ember Data is expecting a payload with a compound document (side-loaded) like:
-
-        ```js
-        {
-          "post": {
-            "id": "1"
-            "title": "Rails is omakase",
-            "author": "2"
-            "comments": []
-          },
-          "authors": [{
-            "id": "2"
-            "post": "1"
-            "name": "dhh"
-          }]
-          "comments": []
-        }
-        ```
-
-        The payload's `author` attribute represents an object with a `belongsTo` relationship.
-        The `post` attribute under `author` is the foreign key with the id for the post
-
-        @method extractSingle
-        @param {DS.Store} store
-        @param {subclass of DS.Model} primaryType
-        @param {Object} payload
-        @param {String} recordId
-        @return Object the primary response to the original request
-      */
-      extractSingle: function(store, primaryType, payload, recordId) {
-        var root = this.keyForAttribute(primaryType.typeKey),
-            partial = payload[root];
-
-        updatePayloadWithEmbedded(this, store, primaryType, payload, partial);
-
-        return this._super(store, primaryType, payload, recordId);
-      },
-
-      /**
-        Extract embedded objects in an array when an attr is configured for embedded,
-        and add them as side-loaded objects instead.
-
-        A payload with an attr configured for embedded records needs to be extracted:
-
-        ```js
-        {
-          "post": {
-            "id": "1"
-            "title": "Rails is omakase",
-            "comments": [{
-              "id": "1",
-              "body": "Rails is unagi"
-            }, {
-              "id": "2",
-              "body": "Omakase O_o"
-            }]
-          }
-        }
-        ```
-
-        Ember Data is expecting a payload with compound document (side-loaded) like:
-
-        ```js
-        {
-          "post": {
-            "id": "1"
-            "title": "Rails is omakase",
-            "comments": ["1", "2"]
-          },
-          "comments": [{
-            "id": "1",
-            "body": "Rails is unagi"
-          }, {
-            "id": "2",
-            "body": "Omakase O_o"
-          }]
-        }
-        ```
-
-        The payload's `comments` attribute represents records in a `hasMany` relationship
-
-        @method extractArray
-        @param {DS.Store} store
-        @param {subclass of DS.Model} primaryType
-        @param {Object} payload
-        @return {Array<Object>} The primary array that was returned in response
-          to the original query.
-      */
-      extractArray: function(store, primaryType, payload) {
-        var root = this.keyForAttribute(primaryType.typeKey),
-            partials = payload[pluralize(root)];
-
-        forEach(partials, function(partial) {
-          updatePayloadWithEmbedded(this, store, primaryType, payload, partial);
-        }, this);
-
-        return this._super(store, primaryType, payload);
-      }
-    });
-
-    // checks config for attrs option to embedded (always) - serialize and deserialize
-    function hasEmbeddedAlwaysOption(attrs, attr) {
-      var option = attrsOption(attrs, attr);
-      return option && option.embedded === 'always';
-    }
-
-    // checks config for attrs option to serialize ids
-    function hasSerializeRecordsOption(attrs, attr) {
-      var alwaysEmbed = hasEmbeddedAlwaysOption(attrs, attr);
-      var option = attrsOption(attrs, attr);
-      return alwaysEmbed || (option && (option.serialize === 'records'));
-    }
-
-    // checks config for attrs option to serialize records
-    function hasSerializeIdsOption(attrs, attr) {
-      var option = attrsOption(attrs, attr);
-      return option && (option.serialize === 'ids' || option.serialize === 'id');
-    }
-
-    // checks config for attrs option to serialize records
-    function noSerializeOptionSpecified(attrs, attr) {
-      var option = attrsOption(attrs, attr);
-      var serializeRecords = hasSerializeRecordsOption(attrs, attr);
-      var serializeIds = hasSerializeIdsOption(attrs, attr);
-      return !(option && (option.serialize || option.embedded));
-    }
-
-    // checks config for attrs option to deserialize records
-    // a defined option object for a resource is treated the same as
-    // `deserialize: 'records'`
-    function hasDeserializeRecordsOption(attrs, attr) {
-      var alwaysEmbed = hasEmbeddedAlwaysOption(attrs, attr);
-      var option = attrsOption(attrs, attr);
-      var hasSerializingOption = option && (option.deserialize || option.serialize);
-      return alwaysEmbed || hasSerializingOption /* option.deserialize === 'records' */;
-    }
-
-    function attrsOption(attrs, attr) {
-      return attrs && (attrs[Ember.String.camelize(attr)] || attrs[attr]);
-    }
-
-    // chooses a relationship kind to branch which function is used to update payload
-    // does not change payload if attr is not embedded
-    function updatePayloadWithEmbedded(serializer, store, type, payload, partial) {
-      var attrs = get(serializer, 'attrs');
-
-      if (!attrs) {
-        return;
-      }
-      type.eachRelationship(function(key, relationship) {
-        if (hasDeserializeRecordsOption(attrs, key)) {
-          if (relationship.kind === "hasMany") {
-            updatePayloadWithEmbeddedHasMany(serializer, store, key, relationship, payload, partial);
-          }
-          if (relationship.kind === "belongsTo") {
-            updatePayloadWithEmbeddedBelongsTo(serializer, store, key, relationship, payload, partial);
-          }
-        }
-      });
-    }
-
-    // handles embedding for `hasMany` relationship
-    function updatePayloadWithEmbeddedHasMany(serializer, store, primaryType, relationship, payload, partial) {
-      var embeddedSerializer = store.serializerFor(relationship.type.typeKey);
-      var primaryKey = get(serializer, 'primaryKey');
-      var attr = relationship.type.typeKey;
-      // underscore forces the embedded records to be side loaded.
-      // it is needed when main type === relationship.type
-      var embeddedTypeKey = '_' + serializer.typeForRoot(relationship.type.typeKey);
-      var expandedKey = serializer.keyForRelationship(primaryType, relationship.kind);
-      var attribute  = serializer.keyForAttribute(primaryType);
-      var ids = [];
-
-      if (!partial[attribute]) {
-        return;
-      }
-
-      payload[embeddedTypeKey] = payload[embeddedTypeKey] || [];
-
-      forEach(partial[attribute], function(data) {
-        var embeddedType = store.modelFor(attr);
-        updatePayloadWithEmbedded(embeddedSerializer, store, embeddedType, payload, data);
-        ids.push(data[primaryKey]);
-        payload[embeddedTypeKey].push(data);
-      });
-
-      partial[expandedKey] = ids;
-      delete partial[attribute];
-    }
-
-    // handles embedding for `belongsTo` relationship
-    function updatePayloadWithEmbeddedBelongsTo(serializer, store, primaryType, relationship, payload, partial) {
-      var attrs = serializer.get('attrs');
-
-      if (!attrs ||
-        !(hasDeserializeRecordsOption(attrs, Ember.String.camelize(primaryType)) ||
-          hasDeserializeRecordsOption(attrs, primaryType))) {
-        return;
-      }
-      var attr = relationship.type.typeKey;
-      var _serializer = store.serializerFor(relationship.type.typeKey);
-      var primaryKey = get(_serializer, 'primaryKey');
-      var embeddedTypeKey = Ember.String.pluralize(attr); // TODO don't use pluralize
-      var expandedKey = _serializer.keyForRelationship(primaryType, relationship.kind);
-      var attribute = _serializer.keyForAttribute(primaryType);
-
-      if (!partial[attribute]) {
-        return;
-      }
-      payload[embeddedTypeKey] = payload[embeddedTypeKey] || [];
-      var embeddedType = store.modelFor(relationship.type.typeKey);
-      // Recursive call for nested record
-      updatePayloadWithEmbedded(_serializer, store, embeddedType, payload, partial[attribute]);
-      partial[expandedKey] = partial[attribute].id;
-      // Need to move an embedded `belongsTo` object into a pluralized collection
-      payload[embeddedTypeKey].push(partial[attribute]);
-      // Need a reference to the parent so relationship works between both `belongsTo` records
-      partial[attribute][relationship.parentType.typeKey + '_id'] = partial.id;
-      delete partial[attribute];
-    }
-
-    __exports__["default"] = EmbeddedRecordsMixin;
+    __exports__["default"] = DS;
   });
-define("ember-data/lib/adapters", 
-  ["./adapters/fixture_adapter","./adapters/rest_adapter","exports"],
+define("ember-data/adapters",
+  ["ember-data/adapters/fixture_adapter","ember-data/adapters/rest_adapter","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     /**
@@ -58936,16 +58616,17 @@ define("ember-data/lib/adapters",
     __exports__.RESTAdapter = RESTAdapter;
     __exports__.FixtureAdapter = FixtureAdapter;
   });
-define("ember-data/lib/adapters/fixture_adapter", 
-  ["../system/adapter","exports"],
+define("ember-data/adapters/fixture_adapter",
+  ["ember-data/system/adapter","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     /**
       @module ember-data
     */
 
-    var get = Ember.get, fmt = Ember.String.fmt,
-        indexOf = Ember.EnumerableUtils.indexOf;
+    var get = Ember.get;
+    var fmt = Ember.String.fmt;
+    var indexOf = Ember.EnumerableUtils.indexOf;
 
     var counter = 0;
 
@@ -58954,7 +58635,7 @@ define("ember-data/lib/adapters/fixture_adapter",
     /**
       `DS.FixtureAdapter` is an adapter that loads records from memory.
       It's primarily used for development and testing. You can also use
-      `DS.FixtureAdapter` while working on the API but are not ready to
+      `DS.FixtureAdapter` while working on the API but is not ready to
       integrate yet. It is a fully functioning adapter. All CRUD methods
       are implemented. You can also implement query logic that a remote
       system would do. It's possible to develop your entire application
@@ -58968,7 +58649,7 @@ define("ember-data/lib/adapters/fixture_adapter",
       @namespace DS
       @extends DS.Adapter
     */
-    var FixtureAdapter = Adapter.extend({
+    __exports__["default"] = Adapter.extend({
       // by default, fixtures are already in normalized form
       serializer: null,
 
@@ -59077,13 +58758,13 @@ define("ember-data/lib/adapters/fixture_adapter",
         @return {Promise} promise
       */
       find: function(store, type, id) {
-        var fixtures = this.fixturesForType(type),
-            fixture;
+        var fixtures = this.fixturesForType(type);
+        var fixture;
 
-        Ember.assert("Unable to find fixtures for model type "+type.toString(), fixtures);
+        Ember.assert("Unable to find fixtures for model type "+type.toString() +". If you're defining your fixtures using `Model.FIXTURES = ...`, please change it to `Model.reopenClass({ FIXTURES: ... })`.", fixtures);
 
         if (fixtures) {
-          fixture = Ember.A(fixtures).findProperty('id', id);
+          fixture = Ember.A(fixtures).findBy('id', id);
         }
 
         if (fixture) {
@@ -59201,9 +58882,7 @@ define("ember-data/lib/adapters/fixture_adapter",
         @return {Promise} promise
       */
       deleteRecord: function(store, type, record) {
-        var fixture = this.mockJSON(store, type, record);
-
-        this.deleteLoadedFixture(type, fixture);
+        this.deleteLoadedFixture(type, record);
 
         return this.simulateRemoteCall(function() {
           // no payload in a deletion
@@ -59220,7 +58899,7 @@ define("ember-data/lib/adapters/fixture_adapter",
       deleteLoadedFixture: function(type, record) {
         var existingFixture = this.findExistingFixture(type, record);
 
-        if(existingFixture) {
+        if (existingFixture) {
           var index = indexOf(type.FIXTURES, existingFixture);
           type.FIXTURES.splice(index, 1);
           return true;
@@ -59248,7 +58927,7 @@ define("ember-data/lib/adapters/fixture_adapter",
       */
       findFixtureById: function(fixtures, id) {
         return Ember.A(fixtures).find(function(r) {
-          if(''+get(r, 'id') === ''+id) {
+          if (''+get(r, 'id') === ''+id) {
             return true;
           } else {
             return false;
@@ -59280,11 +58959,9 @@ define("ember-data/lib/adapters/fixture_adapter",
         }, "DS: FixtureAdapter#simulateRemoteCall");
       }
     });
-
-    __exports__["default"] = FixtureAdapter;
   });
-define("ember-data/lib/adapters/rest_adapter", 
-  ["../system/adapter","exports"],
+define("ember-data/adapters/rest_adapter",
+  ["ember-data/system/adapter","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     /**
@@ -59292,7 +58969,7 @@ define("ember-data/lib/adapters/rest_adapter",
     */
 
     var Adapter = __dependency1__["default"];
-    var get = Ember.get, set = Ember.set;
+    var get = Ember.get;
     var forEach = Ember.ArrayPolyfills.forEach;
 
     /**
@@ -59317,9 +58994,30 @@ define("ember-data/lib/adapters/rest_adapter",
       ```js
       {
         "post": {
+          "id": 1,
           "title": "I'm Running to Reform the W3C's Tag",
           "author": "Yehuda Katz"
         }
+      }
+      ```
+
+      Similarly, in response to a `GET` request for `/posts`, the JSON should
+      look like this:
+
+      ```js
+      {
+        "posts": [
+          {
+            "id": 1,
+            "title": "I'm Running to Reform the W3C's Tag",
+            "author": "Yehuda Katz"
+          },
+          {
+            "id": 2,
+            "title": "Rails is omakase",
+            "author": "D2H"
+          }
+        ]
       }
       ```
 
@@ -59343,6 +59041,7 @@ define("ember-data/lib/adapters/rest_adapter",
       ```js
       {
         "person": {
+          "id": 5,
           "firstName": "Barack",
           "lastName": "Obama",
           "occupation": "President"
@@ -59409,7 +59108,7 @@ define("ember-data/lib/adapters/rest_adapter",
       object outside of Ember's observer system (for example
       `document.cookie`). You can use the
       [volatile](/api/classes/Ember.ComputedProperty.html#method_volatile)
-      function to set the property into a non-chached mode causing the headers to
+      function to set the property into a non-cached mode causing the headers to
       be recomputed with every request.
 
       ```js
@@ -59419,7 +59118,7 @@ define("ember-data/lib/adapters/rest_adapter",
             "API_KEY": Ember.get(document.cookie.match(/apiKey\=([^;]*)/), "1"),
             "ANOTHER_HEADER": "Some header value"
           };
-        }.property().volatile();
+        }.property().volatile()
       });
       ```
 
@@ -59428,8 +59127,52 @@ define("ember-data/lib/adapters/rest_adapter",
       @namespace DS
       @extends DS.Adapter
     */
-    var RESTAdapter = Adapter.extend({
+    __exports__["default"] = Adapter.extend({
       defaultSerializer: '-rest',
+
+      /**
+        By default the RESTAdapter will send each find request coming from a `store.find`
+        or from accessing a relationship separately to the server. If your server supports passing
+        ids as a query string, you can set coalesceFindRequests to true to coalesce all find requests
+        within a single runloop.
+
+        For example, if you have an initial payload of
+        ```javascript
+        post: {
+          id:1,
+          comments: [1,2]
+        }
+        ```
+
+        By default calling `post.get('comments')` will trigger the following requests(assuming the
+        comments haven't been loaded before):
+
+        ```
+        GET /comments/1
+        GET /comments/2
+        ```
+
+        If you set coalesceFindRequests to `true` it will instead trigger the following request:
+
+        ```
+        GET /comments?ids[]=1&ids[]=2
+        ```
+
+        Setting coalesceFindRequests to `true` also works for `store.find` requests and `belongsTo`
+        relationships accessed within the same runloop. If you set `coalesceFindRequests: true`
+
+        ```javascript
+        store.find('comment', 1);
+        store.find('comment', 2);
+        ```
+
+        will also send a request to: `GET /comments?ids[]=1&ids[]=2`
+
+        @property coalesceFindRequests
+        @type {boolean}
+      */
+      coalesceFindRequests: false,
+
       /**
         Endpoint paths can be prefixed with a `namespace` by setting the namespace
         property on the adapter:
@@ -59494,10 +59237,11 @@ define("ember-data/lib/adapters/rest_adapter",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {String} id
+        @param {DS.Model} record
         @return {Promise} promise
       */
-      find: function(store, type, id) {
-        return this.ajax(this.buildURL(type.typeKey, id), 'GET');
+      find: function(store, type, id, record) {
+        return this.ajax(this.buildURL(type.typeKey, id, record), 'GET');
       },
 
       /**
@@ -59546,9 +59290,7 @@ define("ember-data/lib/adapters/rest_adapter",
       },
 
       /**
-        Called by the store in order to fetch a JSON array for
-        the unloaded records in a has-many relationship that were originally
-        specified as IDs.
+        Called by the store in order to fetch several records together if `coalesceFindRequests` is true
 
         For example, if the original payload looks like:
 
@@ -59577,10 +59319,11 @@ define("ember-data/lib/adapters/rest_adapter",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Array} ids
+        @param {Array} records
         @return {Promise} promise
       */
-      findMany: function(store, type, ids) {
-        return this.ajax(this.buildURL(type.typeKey), 'GET', { data: { ids: ids } });
+      findMany: function(store, type, ids, records) {
+        return this.ajax(this.buildURL(type.typeKey, ids, records), 'GET', { data: { ids: ids } });
       },
 
       /**
@@ -59613,9 +59356,9 @@ define("ember-data/lib/adapters/rest_adapter",
         @return {Promise} promise
       */
       findHasMany: function(store, record, url) {
-        var host = get(this, 'host'),
-            id   = get(record, 'id'),
-            type = record.constructor.typeKey;
+        var host = get(this, 'host');
+        var id   = get(record, 'id');
+        var type = record.constructor.typeKey;
 
         if (host && url.charAt(0) === '/' && url.charAt(1) !== '/') {
           url = host + url;
@@ -59652,8 +59395,8 @@ define("ember-data/lib/adapters/rest_adapter",
         @return {Promise} promise
       */
       findBelongsTo: function(store, record, url) {
-        var id   = get(record, 'id'),
-            type = record.constructor.typeKey;
+        var id   = get(record, 'id');
+        var type = record.constructor.typeKey;
 
         return this.ajax(this.urlPrefix(url, this.buildURL(type, id)), 'GET');
       },
@@ -59680,7 +59423,7 @@ define("ember-data/lib/adapters/rest_adapter",
 
         serializer.serializeIntoHash(data, type, record, { includeId: true });
 
-        return this.ajax(this.buildURL(type.typeKey), "POST", { data: data });
+        return this.ajax(this.buildURL(type.typeKey, null, record), "POST", { data: data });
       },
 
       /**
@@ -59707,7 +59450,7 @@ define("ember-data/lib/adapters/rest_adapter",
 
         var id = get(record, 'id');
 
-        return this.ajax(this.buildURL(type.typeKey, id), "PUT", { data: data });
+        return this.ajax(this.buildURL(type.typeKey, id, record), "PUT", { data: data });
       },
 
       /**
@@ -59724,7 +59467,7 @@ define("ember-data/lib/adapters/rest_adapter",
       deleteRecord: function(store, type, record) {
         var id = get(record, 'id');
 
-        return this.ajax(this.buildURL(type.typeKey, id), "DELETE");
+        return this.ajax(this.buildURL(type.typeKey, id, record), "DELETE");
       },
 
       /**
@@ -59740,15 +59483,20 @@ define("ember-data/lib/adapters/rest_adapter",
         @method buildURL
         @param {String} type
         @param {String} id
+        @param {DS.Model} record
         @return {String} url
       */
-      buildURL: function(type, id) {
+      buildURL: function(type, id, record) {
         var url = [],
             host = get(this, 'host'),
             prefix = this.urlPrefix();
 
         if (type) { url.push(this.pathForType(type)); }
-        if (id) { url.push(id); }
+
+        //We might get passed in an array of ids from findMany
+        //in which case we don't want to modify the url, as the
+        //ids will be passed in through a query param
+        if (id && !Ember.isArray(id)) { url.push(id); }
 
         if (prefix) { url.unshift(prefix); }
 
@@ -59766,9 +59514,9 @@ define("ember-data/lib/adapters/rest_adapter",
         @return {String} urlPrefix
       */
       urlPrefix: function(path, parentURL) {
-        var host = get(this, 'host'),
-            namespace = get(this, 'namespace'),
-            url = [];
+        var host = get(this, 'host');
+        var namespace = get(this, 'namespace');
+        var url = [];
 
         if (path) {
           // Absolute path
@@ -59791,6 +59539,89 @@ define("ember-data/lib/adapters/rest_adapter",
         }
 
         return url.join('/');
+      },
+
+      _stripIDFromURL: function(store, record) {
+        var type = store.modelFor(record);
+        var url = this.buildURL(type.typeKey, record.get('id'), record);
+
+        var expandedURL = url.split('/');
+        //Case when the url is of the format ...something/:id
+        var lastSegment = expandedURL[ expandedURL.length - 1 ];
+        var id = record.get('id');
+        if (lastSegment === id) {
+          expandedURL[expandedURL.length - 1] = "";
+        } else if(endsWith(lastSegment, '?id=' + id)) {
+          //Case when the url is of the format ...something?id=:id
+          expandedURL[expandedURL.length - 1] = lastSegment.substring(0, lastSegment.length - id.length - 1);
+        }
+
+        return expandedURL.join('/');
+      },
+
+      /**
+        Organize records into groups, each of which is to be passed to separate
+        calls to `findMany`.
+
+        This implementation groups together records that have the same base URL but
+        differing ids. For example `/comments/1` and `/comments/2` will be grouped together
+        because we know findMany can coalesce them together as `/comments?ids[]=1&ids[]=2`
+
+        It also supports urls where ids are passed as a query param, such as `/comments?id=1`
+        but not those where there is more than 1 query param such as `/comments?id=2&name=David`
+        Currently only the query param of `id` is supported. If you need to support others, please
+        override this or the `_stripIDFromURL` method.
+
+        It does not group records that have differing base urls, such as for example: `/posts/1/comments/2`
+        and `/posts/2/comments/3`
+
+        @method groupRecordsForFindMany
+        @param {Array} records
+        @return {Array}  an array of arrays of records, each of which is to be
+                          loaded separately by `findMany`.
+      */
+      groupRecordsForFindMany: function (store, records) {
+        var groups = Ember.MapWithDefault.create({defaultValue: function(){return [];}});
+        var adapter = this;
+
+        forEach.call(records, function(record){
+          var baseUrl = adapter._stripIDFromURL(store, record);
+          groups.get(baseUrl).push(record);
+        });
+
+        function splitGroupToFitInUrl(group, maxUrlLength) {
+          var baseUrl = adapter._stripIDFromURL(store, group[0]);
+          var idsSize = 0;
+          var splitGroups = [[]];
+
+          forEach.call(group, function(record) {
+            var additionalLength = '&ids[]='.length + record.get('id.length');
+            if (baseUrl.length + idsSize + additionalLength >= maxUrlLength) {
+              idsSize = 0;
+              splitGroups.push([]);
+            }
+
+            idsSize += additionalLength;
+
+            var lastGroupIndex = splitGroups.length - 1;
+            splitGroups[lastGroupIndex].push(record);
+          });
+
+          return splitGroups;
+        }
+
+        var groupsArray = [];
+        groups.forEach(function(key, group){
+          // http://stackoverflow.com/questions/417142/what-is-the-maximum-length-of-a-url-in-different-browsers
+          var maxUrlLength = 2048;
+          var splitGroups = splitGroupToFitInUrl(group, maxUrlLength);
+
+          forEach.call(splitGroups, function(splitGroup) {
+            groupsArray.push(splitGroup);
+          });
+        });
+
+        return groupsArray;
       },
 
       /**
@@ -59888,11 +59719,11 @@ define("ember-data/lib/adapters/rest_adapter",
         @param {Object} hash
         @return {Promise} promise
       */
-      ajax: function(url, type, hash) {
+      ajax: function(url, type, options) {
         var adapter = this;
 
         return new Ember.RSVP.Promise(function(resolve, reject) {
-          hash = adapter.ajaxOptions(url, type, hash);
+          var hash = adapter.ajaxOptions(url, type, options);
 
           hash.success = function(json) {
             Ember.run(null, resolve, json);
@@ -59903,7 +59734,7 @@ define("ember-data/lib/adapters/rest_adapter",
           };
 
           Ember.$.ajax(hash);
-        }, "DS: RestAdapter#ajax " + type + " to " + url);
+        }, "DS: RESTAdapter#ajax " + type + " to " + url);
       },
 
       /**
@@ -59914,8 +59745,8 @@ define("ember-data/lib/adapters/rest_adapter",
         @param {Object} hash
         @return {Object} hash
       */
-      ajaxOptions: function(url, type, hash) {
-        hash = hash || {};
+      ajaxOptions: function(url, type, options) {
+        var hash = options || {};
         hash.url = url;
         hash.type = type;
         hash.dataType = 'json';
@@ -59935,15 +59766,20 @@ define("ember-data/lib/adapters/rest_adapter",
           };
         }
 
-
         return hash;
       }
-
     });
 
-    __exports__["default"] = RESTAdapter;
+    //From http://stackoverflow.com/questions/280634/endswith-in-javascript
+    function endsWith(string, suffix){
+      if (typeof String.prototype.endsWith !== 'function') {
+        return string.indexOf(suffix, string.length - suffix.length) !== -1;
+      } else {
+        return string.endsWith(suffix);
+      }
+    }
   });
-define("ember-data/lib/core", 
+define("ember-data/core",
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -59962,11 +59798,11 @@ define("ember-data/lib/core",
       /**
         @property VERSION
         @type String
-        @default '1.0.0-beta.8.2a68c63a'
+        @default '1.0.0-beta.9'
         @static
       */
       DS = Ember.Namespace.create({
-        VERSION: '1.0.0-beta.8.2a68c63a'
+        VERSION: '1.0.0-beta.9'
       });
 
       if (Ember.libraries) {
@@ -59976,8 +59812,8 @@ define("ember-data/lib/core",
 
     __exports__["default"] = DS;
   });
-define("ember-data/lib/ember-initializer", 
-  ["./setup-container"],
+define("ember-data/ember-initializer",
+  ["ember-data/setup-container"],
   function(__dependency1__) {
     "use strict";
     var setupContainer = __dependency1__["default"];
@@ -59988,7 +59824,7 @@ define("ember-data/lib/ember-initializer",
       @module ember-data
     */
 
-    /**
+    /*
 
       This code initializes Ember-Data onto an Ember application.
 
@@ -60060,7 +59896,7 @@ define("ember-data/lib/ember-initializer",
       });
     });
   });
-define("ember-data/lib/ext/date", 
+define("ember-data/ext/date",
   [],
   function() {
     "use strict";
@@ -60125,8 +59961,8 @@ define("ember-data/lib/ext/date",
       Date.parse = Ember.Date.parse;
     }
   });
-define("ember-data/lib/initializers/data_adapter", 
-  ["../system/debug/debug_adapter","exports"],
+define("ember-data/initializers/data_adapter",
+  ["ember-data/system/debug/debug_adapter","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var DebugAdapter = __dependency1__["default"];
@@ -60142,8 +59978,8 @@ define("ember-data/lib/initializers/data_adapter",
       container.register('data-adapter:main', DebugAdapter);
     };
   });
-define("ember-data/lib/initializers/store", 
-  ["../serializers","../adapters","../system/container_proxy","../system/store","exports"],
+define("ember-data/initializers/store",
+  ["ember-data/serializers","ember-data/adapters","ember-data/system/container_proxy","ember-data/system/store","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
     var JSONSerializer = __dependency1__.JSONSerializer;
@@ -60170,9 +60006,9 @@ define("ember-data/lib/initializers/store",
 
       var proxy = new ContainerProxy(container);
       proxy.registerDeprecations([
-        {deprecated: 'serializer:_default',  valid: 'serializer:-default'},
-        {deprecated: 'serializer:_rest',     valid: 'serializer:-rest'},
-        {deprecated: 'adapter:_rest',        valid: 'adapter:-rest'}
+        { deprecated: 'serializer:_default',  valid: 'serializer:-default' },
+        { deprecated: 'serializer:_rest',     valid: 'serializer:-rest' },
+        { deprecated: 'adapter:_rest',        valid: 'adapter:-rest' }
       ]);
 
       // new go forward paths
@@ -60185,7 +60021,7 @@ define("ember-data/lib/initializers/store",
       container.lookup('store:main');
     };
   });
-define("ember-data/lib/initializers/store_injections", 
+define("ember-data/initializers/store_injections",
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -60203,8 +60039,8 @@ define("ember-data/lib/initializers/store_injections",
       container.injection('data-adapter', 'store', 'store:main');
     };
   });
-define("ember-data/lib/initializers/transforms", 
-  ["../transforms","exports"],
+define("ember-data/initializers/transforms",
+  ["ember-data/transforms","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var BooleanTransform = __dependency1__.BooleanTransform;
@@ -60226,123 +60062,8 @@ define("ember-data/lib/initializers/transforms",
       container.register('transform:string',  StringTransform);
     };
   });
-define("ember-data/lib/main", 
-  ["./core","./ext/date","./system/store","./system/model","./system/changes","./system/adapter","./system/debug","./system/record_arrays","./system/record_array_manager","./adapters","./serializers/json_serializer","./serializers/rest_serializer","../../ember-inflector/lib/main","../../activemodel-adapter/lib/main","./transforms","./system/relationships","./ember-initializer","./setup-container","./system/container_proxy","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __dependency9__, __dependency10__, __dependency11__, __dependency12__, __dependency13__, __dependency14__, __dependency15__, __dependency16__, __dependency17__, __dependency18__, __dependency19__, __exports__) {
-    "use strict";
-    /**
-      Ember Data
-
-      @module ember-data
-      @main ember-data
-    */
-
-    // support RSVP 2.x via resolve,  but prefer RSVP 3.x's Promise.cast
-    Ember.RSVP.Promise.cast = Ember.RSVP.Promise.cast || Ember.RSVP.resolve;
-
-    var DS = __dependency1__["default"];
-
-    var Store = __dependency3__.Store;
-    var PromiseArray = __dependency3__.PromiseArray;
-    var PromiseObject = __dependency3__.PromiseObject;
-    var Model = __dependency4__.Model;
-    var Errors = __dependency4__.Errors;
-    var RootState = __dependency4__.RootState;
-    var attr = __dependency4__.attr;
-    var AttributeChange = __dependency5__.AttributeChange;
-    var RelationshipChange = __dependency5__.RelationshipChange;
-    var RelationshipChangeAdd = __dependency5__.RelationshipChangeAdd;
-    var RelationshipChangeRemove = __dependency5__.RelationshipChangeRemove;
-    var OneToManyChange = __dependency5__.OneToManyChange;
-    var ManyToNoneChange = __dependency5__.ManyToNoneChange;
-    var OneToOneChange = __dependency5__.OneToOneChange;
-    var ManyToManyChange = __dependency5__.ManyToManyChange;
-    var InvalidError = __dependency6__.InvalidError;
-    var Adapter = __dependency6__.Adapter;
-    var DebugAdapter = __dependency7__["default"];
-    var RecordArray = __dependency8__.RecordArray;
-    var FilteredRecordArray = __dependency8__.FilteredRecordArray;
-    var AdapterPopulatedRecordArray = __dependency8__.AdapterPopulatedRecordArray;
-    var ManyArray = __dependency8__.ManyArray;
-    var RecordArrayManager = __dependency9__["default"];
-    var RESTAdapter = __dependency10__.RESTAdapter;
-    var FixtureAdapter = __dependency10__.FixtureAdapter;
-    var JSONSerializer = __dependency11__["default"];
-    var RESTSerializer = __dependency12__["default"];
-    var ActiveModelAdapter = __dependency14__.ActiveModelAdapter;
-    var ActiveModelSerializer = __dependency14__.ActiveModelSerializer;
-    var EmbeddedRecordsMixin = __dependency14__.EmbeddedRecordsMixin;
-
-    var Transform = __dependency15__.Transform;
-    var DateTransform = __dependency15__.DateTransform;
-    var NumberTransform = __dependency15__.NumberTransform;
-    var StringTransform = __dependency15__.StringTransform;
-    var BooleanTransform = __dependency15__.BooleanTransform;
-
-    var hasMany = __dependency16__.hasMany;
-    var belongsTo = __dependency16__.belongsTo;
-    var setupContainer = __dependency18__["default"];
-
-    var ContainerProxy = __dependency19__["default"];
-
-    DS.Store         = Store;
-    DS.PromiseArray  = PromiseArray;
-    DS.PromiseObject = PromiseObject;
-
-    DS.Model     = Model;
-    DS.RootState = RootState;
-    DS.attr      = attr;
-    DS.Errors    = Errors;
-
-    DS.AttributeChange       = AttributeChange;
-    DS.RelationshipChange    = RelationshipChange;
-    DS.RelationshipChangeAdd = RelationshipChangeAdd;
-    DS.OneToManyChange       = OneToManyChange;
-    DS.ManyToNoneChange      = OneToManyChange;
-    DS.OneToOneChange        = OneToOneChange;
-    DS.ManyToManyChange      = ManyToManyChange;
-
-    DS.Adapter      = Adapter;
-    DS.InvalidError = InvalidError;
-
-    DS.DebugAdapter = DebugAdapter;
-
-    DS.RecordArray                 = RecordArray;
-    DS.FilteredRecordArray         = FilteredRecordArray;
-    DS.AdapterPopulatedRecordArray = AdapterPopulatedRecordArray;
-    DS.ManyArray                   = ManyArray;
-
-    DS.RecordArrayManager = RecordArrayManager;
-
-    DS.RESTAdapter    = RESTAdapter;
-    DS.FixtureAdapter = FixtureAdapter;
-
-    DS.RESTSerializer = RESTSerializer;
-    DS.JSONSerializer = JSONSerializer;
-
-    DS.Transform       = Transform;
-    DS.DateTransform   = DateTransform;
-    DS.StringTransform = StringTransform;
-    DS.NumberTransform = NumberTransform;
-    DS.BooleanTransform = BooleanTransform;
-
-    DS.ActiveModelAdapter    = ActiveModelAdapter;
-    DS.ActiveModelSerializer = ActiveModelSerializer;
-    DS.EmbeddedRecordsMixin  = EmbeddedRecordsMixin;
-
-    DS.belongsTo = belongsTo;
-    DS.hasMany   = hasMany;
-
-    DS.ContainerProxy = ContainerProxy;
-
-    DS._setupContainer = setupContainer;
-
-    Ember.lookup.DS = DS;
-
-    __exports__["default"] = DS;
-  });
-define("ember-data/lib/serializers", 
-  ["./serializers/json_serializer","./serializers/rest_serializer","exports"],
+define("ember-data/serializers",
+  ["ember-data/serializers/json_serializer","ember-data/serializers/rest_serializer","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     var JSONSerializer = __dependency1__["default"];
@@ -60351,13 +60072,453 @@ define("ember-data/lib/serializers",
     __exports__.JSONSerializer = JSONSerializer;
     __exports__.RESTSerializer = RESTSerializer;
   });
-define("ember-data/lib/serializers/json_serializer", 
-  ["../system/changes","exports"],
+define("ember-data/serializers/embedded_records_mixin",
+  ["ember-inflector","exports"],
+  function(__dependency1__, __exports__) {
+    "use strict";
+    var get = Ember.get;
+    var forEach = Ember.EnumerableUtils.forEach;
+    var camelize = Ember.String.camelize;
+
+    var pluralize = __dependency1__.pluralize;
+
+    /**
+      ## Using Embedded Records
+
+      `DS.EmbeddedRecordsMixin` supports serializing embedded records.
+
+      To set up embedded records, include the mixin when extending a serializer
+      then define and configure embedded (model) relationships.
+
+      Below is an example of a per-type serializer ('post' type).
+
+      ```js
+      App.PostSerializer = DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
+        attrs: {
+          author: {embedded: 'always'},
+          comments: {serialize: 'ids'}
+        }
+      })
+      ```
+
+      The `attrs` option for a resource `{embedded: 'always'}` is shorthand for:
+
+      ```js
+      {serialize: 'records', deserialize: 'records'}
+      ```
+
+      ### Configuring Attrs
+
+      A resource's `attrs` option may be set to use `ids`, `records` or false for the
+      `serialize`  and `deserialize` settings.
+
+      The `attrs` property can be set on the ApplicationSerializer or a per-type
+      serializer.
+
+      In the case where embedded JSON is expected while extracting a payload (reading)
+      the setting is `deserialize: 'records'`, there is no need to use `ids` when
+      extracting as that is the default behavior without this mixin if you are using
+      the vanilla EmbeddedRecordsMixin. Likewise, to embed JSON in the payload while
+      serializing `serialize: 'records'` is the setting to use. There is an option of
+      not embedding JSON in the serialized payload by using `serialize: 'ids'`. If you
+      do not want the relationship sent at all, you can use `serialize: false`.
+
+
+      ### EmbeddedRecordsMixin defaults
+      If you do not overwrite `attrs` for a specific relationship, the `EmbeddedRecordsMixin`
+      will behave in the following way:
+
+      BelongsTo: `{serialize:'id', deserialize:'id'}`
+      HasMany:   `{serialize:false,  deserialize:'ids'}`
+
+      ### Model Relationships
+
+      Embedded records must have a model defined to be extracted and serialized.
+
+      To successfully extract and serialize embedded records the model relationships
+      must be setup correcty See the
+      [defining relationships](/guides/models/defining-models/#toc_defining-relationships)
+      section of the **Defining Models** guide page.
+
+      Records without an `id` property are not considered embedded records, model
+      instances must have an `id` property to be used with Ember Data.
+
+      ### Example JSON payloads, Models and Serializers
+
+      **When customizing a serializer it is imporant to grok what the cusomizations
+      are, please read the docs for the methods this mixin provides, in case you need
+      to modify to fit your specific needs.**
+
+      For example review the docs for each method of this mixin:
+      * [normalize](/api/data/classes/DS.EmbeddedRecordsMixin.html#method_normalize)
+      * [serializeBelongsTo](/api/data/classes/DS.EmbeddedRecordsMixin.html#method_serializeBelongsTo)
+      * [serializeHasMany](/api/data/classes/DS.EmbeddedRecordsMixin.html#method_serializeHasMany)
+
+      @class EmbeddedRecordsMixin
+      @namespace DS
+    */
+    var EmbeddedRecordsMixin = Ember.Mixin.create({
+
+      /**
+        Normalize the record and recursively normalize/extract all the embedded records
+        while pushing them into the store as they are encountered
+
+        A payload with an attr configured for embedded records needs to be extracted:
+
+        ```js
+        {
+          "post": {
+            "id": "1"
+            "title": "Rails is omakase",
+            "comments": [{
+              "id": "1",
+              "body": "Rails is unagi"
+            }, {
+              "id": "2",
+              "body": "Omakase O_o"
+            }]
+          }
+        }
+        ```
+       @method normalize
+       @param {subclass of DS.Model} type
+       @param {Object} hash to be normalized
+       @param {String} key the hash has been referenced by
+       @return {Object} the normalized hash
+      **/
+      normalize: function(type, hash, prop) {
+        var normalizedHash = this._super(type, hash, prop);
+        return extractEmbeddedRecords(this, this.store, type, normalizedHash);
+      },
+
+      keyForRelationship: function(key, type){
+        if (this.hasDeserializeRecordsOption(key)) {
+          return this.keyForAttribute(key);
+        } else {
+          return this._super(key, type) || key;
+        }
+      },
+
+      /**
+        Serialize `belongsTo` relationship when it is configured as an embedded object.
+
+        This example of an author model belongs to a post model:
+
+        ```js
+        Post = DS.Model.extend({
+          title:    DS.attr('string'),
+          body:     DS.attr('string'),
+          author:   DS.belongsTo('author')
+        });
+
+        Author = DS.Model.extend({
+          name:     DS.attr('string'),
+          post:     DS.belongsTo('post')
+        });
+        ```
+
+        Use a custom (type) serializer for the post model to configure embedded author
+
+        ```js
+        App.PostSerializer = DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
+          attrs: {
+            author: {embedded: 'always'}
+          }
+        })
+        ```
+
+        A payload with an attribute configured for embedded records can serialize
+        the records together under the root attribute's payload:
+
+        ```js
+        {
+          "post": {
+            "id": "1"
+            "title": "Rails is omakase",
+            "author": {
+              "id": "2"
+              "name": "dhh"
+            }
+          }
+        }
+        ```
+
+        @method serializeBelongsTo
+        @param {DS.Model} record
+        @param {Object} json
+        @param {Object} relationship
+      */
+      serializeBelongsTo: function(record, json, relationship) {
+        var attr = relationship.key;
+        var attrs = this.get('attrs');
+        if (this.noSerializeOptionSpecified(attr)) {
+          this._super(record, json, relationship);
+          return;
+        }
+        var includeIds = this.hasSerializeIdsOption(attr);
+        var includeRecords = this.hasSerializeRecordsOption(attr);
+        var embeddedRecord = record.get(attr);
+        var key;
+        if (includeIds) {
+          key = this.keyForRelationship(attr, relationship.kind);
+          if (!embeddedRecord) {
+            json[key] = null;
+          } else {
+            json[key] = get(embeddedRecord, 'id');
+          }
+        } else if (includeRecords) {
+          key = this.keyForAttribute(attr);
+          if (!embeddedRecord) {
+            json[key] = null;
+          } else {
+            json[key] = embeddedRecord.serialize({includeId: true});
+            this.removeEmbeddedForeignKey(record, embeddedRecord, relationship, json[key]);
+          }
+        }
+      },
+
+      /**
+        Serialize `hasMany` relationship when it is configured as embedded objects.
+
+        This example of a post model has many comments:
+
+        ```js
+        Post = DS.Model.extend({
+          title:    DS.attr('string'),
+          body:     DS.attr('string'),
+          comments: DS.hasMany('comment')
+        });
+
+        Comment = DS.Model.extend({
+          body:     DS.attr('string'),
+          post:     DS.belongsTo('post')
+        });
+        ```
+
+        Use a custom (type) serializer for the post model to configure embedded comments
+
+        ```js
+        App.PostSerializer = DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
+          attrs: {
+            comments: {embedded: 'always'}
+          }
+        })
+        ```
+
+        A payload with an attribute configured for embedded records can serialize
+        the records together under the root attribute's payload:
+
+        ```js
+        {
+          "post": {
+            "id": "1"
+            "title": "Rails is omakase",
+            "body": "I want this for my ORM, I want that for my template language..."
+            "comments": [{
+              "id": "1",
+              "body": "Rails is unagi"
+            }, {
+              "id": "2",
+              "body": "Omakase O_o"
+            }]
+          }
+        }
+        ```
+
+        The attrs options object can use more specific instruction for extracting and
+        serializing. When serializing, an option to embed `ids` or `records` can be set.
+        When extracting the only option is `records`.
+
+        So `{embedded: 'always'}` is shorthand for:
+        `{serialize: 'records', deserialize: 'records'}`
+
+        To embed the `ids` for a related object (using a hasMany relationship):
+
+        ```js
+        App.PostSerializer = DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
+          attrs: {
+            comments: {serialize: 'ids', deserialize: 'records'}
+          }
+        })
+        ```
+
+        ```js
+        {
+          "post": {
+            "id": "1"
+            "title": "Rails is omakase",
+            "body": "I want this for my ORM, I want that for my template language..."
+            "comments": ["1", "2"]
+          }
+        }
+        ```
+
+        @method serializeHasMany
+        @param {DS.Model} record
+        @param {Object} json
+        @param {Object} relationship
+      */
+      serializeHasMany: function(record, json, relationship) {
+        var attr = relationship.key;
+        var attrs = this.get('attrs');
+        if (this.noSerializeOptionSpecified(attr)) {
+          this._super(record, json, relationship);
+          return;
+        }
+        var includeIds = this.hasSerializeIdsOption(attr);
+        var includeRecords = this.hasSerializeRecordsOption(attr);
+        var key;
+        if (includeIds) {
+          key = this.keyForRelationship(attr, relationship.kind);
+          json[key] = get(record, attr).mapBy('id');
+        } else if (includeRecords) {
+          key = this.keyForAttribute(attr);
+          json[key] = get(record, attr).map(function(embeddedRecord) {
+            var serializedEmbeddedRecord = embeddedRecord.serialize({includeId: true});
+            this.removeEmbeddedForeignKey(record, embeddedRecord, relationship, serializedEmbeddedRecord);
+            return serializedEmbeddedRecord;
+          }, this);
+        }
+      },
+
+      /**
+        When serializing an embedded record, modify the property (in the json payload)
+        that refers to the parent record (foreign key for relationship).
+
+        Serializing a `belongsTo` relationship removes the property that refers to the
+        parent record
+
+        Serializing a `hasMany` relationship does not remove the property that refers to
+        the parent record.
+
+        @method removeEmbeddedForeignKey
+        @param {DS.Model} record
+        @param {DS.Model} embeddedRecord
+        @param {Object} relationship
+        @param {Object} json
+      */
+      removeEmbeddedForeignKey: function (record, embeddedRecord, relationship, json) {
+        if (relationship.kind === 'hasMany') {
+          return;
+        } else if (relationship.kind === 'belongsTo') {
+          var parentRecord = record.constructor.inverseFor(relationship.key);
+          if (parentRecord) {
+            var name = parentRecord.name;
+            var embeddedSerializer = this.store.serializerFor(embeddedRecord.constructor);
+            var parentKey = embeddedSerializer.keyForRelationship(name, parentRecord.kind);
+            if (parentKey) {
+              delete json[parentKey];
+            }
+          }
+        }
+      },
+
+      // checks config for attrs option to embedded (always) - serialize and deserialize
+      hasEmbeddedAlwaysOption: function (attr) {
+        var option = this.attrsOption(attr);
+        return option && option.embedded === 'always';
+      },
+
+      // checks config for attrs option to serialize ids
+      hasSerializeRecordsOption: function(attr) {
+        var alwaysEmbed = this.hasEmbeddedAlwaysOption(attr);
+        var option = this.attrsOption(attr);
+        return alwaysEmbed || (option && (option.serialize === 'records'));
+      },
+
+      // checks config for attrs option to serialize records
+      hasSerializeIdsOption: function(attr) {
+        var option = this.attrsOption(attr);
+        return option && (option.serialize === 'ids' || option.serialize === 'id');
+      },
+
+      // checks config for attrs option to serialize records
+      noSerializeOptionSpecified: function(attr) {
+        var option = this.attrsOption(attr);
+        var serializeRecords = this.hasSerializeRecordsOption(attr);
+        var serializeIds = this.hasSerializeIdsOption(attr);
+        return !(option && (option.serialize || option.embedded));
+      },
+
+      // checks config for attrs option to deserialize records
+      // a defined option object for a resource is treated the same as
+      // `deserialize: 'records'`
+      hasDeserializeRecordsOption: function(attr) {
+        var alwaysEmbed = this.hasEmbeddedAlwaysOption(attr);
+        var option = this.attrsOption(attr);
+        return alwaysEmbed || (option && option.deserialize === 'records');
+      },
+
+      attrsOption: function(attr) {
+        var attrs = this.get('attrs');
+        return attrs && (attrs[camelize(attr)] || attrs[attr]);
+      }
+    });
+
+    // chooses a relationship kind to branch which function is used to update payload
+    // does not change payload if attr is not embedded
+    function extractEmbeddedRecords(serializer, store, type, partial) {
+
+      type.eachRelationship(function(key, relationship) {
+        if (serializer.hasDeserializeRecordsOption(key)) {
+          var embeddedType = store.modelFor(relationship.type.typeKey);
+          if (relationship.kind === "hasMany") {
+            extractEmbeddedHasMany(store, key, embeddedType, partial);
+          }
+          if (relationship.kind === "belongsTo") {
+            extractEmbeddedBelongsTo(store, key, embeddedType, partial);
+          }
+        }
+      });
+
+      return partial;
+    }
+
+    // handles embedding for `hasMany` relationship
+    function extractEmbeddedHasMany(store, key, embeddedType, hash) {
+      if (!hash[key]) {
+        return hash;
+      }
+
+      var ids = [];
+
+      var embeddedSerializer = store.serializerFor(embeddedType.typeKey);
+      forEach(hash[key], function(data) {
+        var embeddedRecord = embeddedSerializer.normalize(embeddedType, data, null);
+        store.push(embeddedType, embeddedRecord);
+        ids.push(embeddedRecord.id);
+      });
+
+      hash[key] = ids;
+      return hash;
+    }
+
+    function extractEmbeddedBelongsTo(store, key, embeddedType, hash) {
+      if (!hash[key]) {
+        return hash;
+      }
+
+      var embeddedSerializer = store.serializerFor(embeddedType.typeKey);
+      var embeddedRecord = embeddedSerializer.normalize(embeddedType, hash[key], null);
+      store.push(embeddedType, embeddedRecord);
+
+      hash[key] = embeddedRecord.id;
+      //TODO Need to add a reference to the parent later so relationship works between both `belongsTo` records
+      return hash;
+    }
+
+    __exports__["default"] = EmbeddedRecordsMixin;
+  });
+define("ember-data/serializers/json_serializer",
+  ["ember-data/system/changes","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var RelationshipChange = __dependency1__.RelationshipChange;
-    var get = Ember.get, set = Ember.set, isNone = Ember.isNone,
-        map = Ember.ArrayPolyfills.map;
+    var get = Ember.get;
+    var set = Ember.set;
+    var isNone = Ember.isNone;
+    var map = Ember.ArrayPolyfills.map;
+    var merge = Ember.merge;
 
     /**
       In Ember Data a Serializer is used to serialize and deserialize
@@ -60374,7 +60535,7 @@ define("ember-data/lib/serializers/json_serializer",
       @class JSONSerializer
       @namespace DS
     */
-    var JSONSerializer = Ember.Object.extend({
+    __exports__["default"] = Ember.Object.extend({
       /**
         The primaryKey is used when serializing and deserializing
         data. Ember Data always uses the `id` property to store the id of
@@ -60401,7 +60562,7 @@ define("ember-data/lib/serializers/json_serializer",
         The `attrs` object can be used to declare a simple mapping between
         property names on `DS.Model` records and payload keys in the
         serialized JSON object representing the record. An object with the
-        propery `key` can also be used to designate the attribute's key on
+        property `key` can also be used to designate the attribute's key on
         the response payload.
 
         Example
@@ -60422,6 +60583,30 @@ define("ember-data/lib/serializers/json_serializer",
         });
         ```
 
+        You can also remove attributes by setting the `serialize` key to
+        false in your mapping object.
+
+        Example
+
+        ```javascript
+        App.PersonSerializer = DS.JSONSerializer.extend({
+          attrs: {
+            admin: {serialize: false},
+            occupation: {key: 'career'}
+          }
+        });
+        ```
+
+        When serialized:
+
+        ```javascript
+        {
+          "career": "magician"
+        }
+        ```
+
+        Note that the `admin` is now not included in the payload.
+
         @property attrs
         @type {Object}
       */
@@ -60441,6 +60626,8 @@ define("ember-data/lib/serializers/json_serializer",
       */
       applyTransforms: function(type, data) {
         type.eachTransformedAttribute(function(key, type) {
+          if (!data.hasOwnProperty(key)) { return; }
+
           var transform = this.transformFor(type);
           data[key] = transform.deserialize(data[key]);
         }, this);
@@ -60487,9 +60674,74 @@ define("ember-data/lib/serializers/json_serializer",
         if (!hash) { return hash; }
 
         this.normalizeId(hash);
+        this.normalizeAttributes(type, hash);
+        this.normalizeRelationships(type, hash);
+
         this.normalizeUsingDeclaredMapping(type, hash);
         this.applyTransforms(type, hash);
         return hash;
+      },
+
+      /**
+        You can use this method to normalize all payloads, regardless of whether they
+        represent single records or an array.
+
+        For example, you might want to remove some extraneous data from the payload:
+
+        ```js
+        App.ApplicationSerializer = DS.JSONSerializer.extend({
+          normalizePayload: function(payload) {
+            delete payload.version;
+            delete payload.status;
+            return payload;
+          }
+        });
+        ```
+
+        @method normalizePayload
+        @param {Object} payload
+        @return {Object} the normalized payload
+      */
+      normalizePayload: function(payload) {
+        return payload;
+      },
+
+      /**
+        @method normalizeAttributes
+        @private
+      */
+      normalizeAttributes: function(type, hash) {
+        var payloadKey, key;
+
+        if (this.keyForAttribute) {
+          type.eachAttribute(function(key) {
+            payloadKey = this.keyForAttribute(key);
+            if (key === payloadKey) { return; }
+            if (!hash.hasOwnProperty(payloadKey)) { return; }
+
+            hash[key] = hash[payloadKey];
+            delete hash[payloadKey];
+          }, this);
+        }
+      },
+
+      /**
+        @method normalizeRelationships
+        @private
+      */
+      normalizeRelationships: function(type, hash) {
+        var payloadKey, key;
+
+        if (this.keyForRelationship) {
+          type.eachRelationship(function(key, relationship) {
+            payloadKey = this.keyForRelationship(key, relationship.kind);
+            if (key === payloadKey) { return; }
+            if (!hash.hasOwnProperty(payloadKey)) { return; }
+
+            hash[key] = hash[payloadKey];
+            delete hash[payloadKey];
+          }, this);
+        }
       },
 
       /**
@@ -60501,17 +60753,17 @@ define("ember-data/lib/serializers/json_serializer",
 
         if (attrs) {
           for (key in attrs) {
-            payloadKey = attrs[key];
-            if (payloadKey && payloadKey.key) {
-              payloadKey = payloadKey.key;
-            }
-            if (typeof payloadKey === 'string') {
+            payloadKey = this._getMappedKey(key);
+            if (!hash.hasOwnProperty(payloadKey)) { continue; }
+
+            if (payloadKey !== key) {
               hash[key] = hash[payloadKey];
               delete hash[payloadKey];
             }
           }
         }
       },
+
       /**
         @method normalizeId
         @private
@@ -60523,6 +60775,48 @@ define("ember-data/lib/serializers/json_serializer",
 
         hash.id = hash[primaryKey];
         delete hash[primaryKey];
+      },
+
+      /**
+        Looks up the property key that was set by the custom `attr` mapping
+        passed to the serializer.
+
+        @method _getMappedKey
+        @private
+        @param {String} key
+        @return {String} key
+      */
+      _getMappedKey: function(key) {
+        var attrs = get(this, 'attrs');
+        var mappedKey;
+        if (attrs && attrs[key]) {
+          mappedKey = attrs[key];
+          //We need to account for both the {title: 'post_title'} and
+          //{title: {key: 'post_title'}} forms
+          if (mappedKey.key){
+            mappedKey = mappedKey.key;
+          }
+          if (typeof mappedKey === 'string'){
+            key = mappedKey;
+          }
+        }
+
+        return key;
+      },
+
+      /**
+        Check attrs.key.serialize property to inform if the `key`
+        can be serialized
+
+        @method _canSerialize
+        @private
+        @param {String} key
+        @return {boolean} true if the key can be serialized
+      */
+      _canSerialize: function(key) {
+        var attrs = get(this, 'attrs');
+
+        return !attrs || !attrs[key] || attrs[key].serialize !== false;
       },
 
       // SERIALIZE
@@ -60585,7 +60879,7 @@ define("ember-data/lib/serializers/json_serializer",
             var json = {
               POST_TTL: post.get('title'),
               POST_BDY: post.get('body'),
-              POST_CMS: post.get('comments').mapProperty('id')
+              POST_CMS: post.get('comments').mapBy('id')
             }
 
             if (options.includeId) {
@@ -60696,6 +60990,34 @@ define("ember-data/lib/serializers/json_serializer",
       },
 
       /**
+        You can use this method to customize how a serialized record is added to the complete
+        JSON hash to be sent to the server. By default the JSON Serializer does not namespace
+        the payload and just sends the raw serialized JSON object.
+        If your server expects namespaced keys, you should consider using the RESTSerializer.
+        Otherwise you can override this method to customize how the record is added to the hash.
+
+        For example, your server may expect underscored root objects.
+
+        ```js
+        App.ApplicationSerializer = DS.RESTSerializer.extend({
+          serializeIntoHash: function(data, type, record, options) {
+            var root = Ember.String.decamelize(type.typeKey);
+            data[root] = this.serialize(record, options);
+          }
+        });
+        ```
+
+        @method serializeIntoHash
+        @param {Object} hash
+        @param {subclass of DS.Model} type
+        @param {DS.Model} record
+        @param {Object} options
+      */
+      serializeIntoHash: function(hash, type, record, options) {
+        merge(hash, this.serialize(record, options));
+      },
+
+      /**
        `serializeAttribute` can be used to customize how `DS.attr`
        properties are serialized
 
@@ -60719,19 +61041,25 @@ define("ember-data/lib/serializers/json_serializer",
        @param {Object} attribute
       */
       serializeAttribute: function(record, json, key, attribute) {
-        var attrs = get(this, 'attrs');
-        var value = get(record, key), type = attribute.type;
+        var type = attribute.type;
 
-        if (type) {
-          var transform = this.transformFor(type);
-          value = transform.serialize(value);
+        if (this._canSerialize(key)) {
+          var value = get(record, key);
+          if (type) {
+            var transform = this.transformFor(type);
+            value = transform.serialize(value);
+          }
+
+          // if provided, use the mapping provided by `attrs` in
+          // the serializer
+          var payloadKey =  this._getMappedKey(key);
+
+          if (payloadKey === key && this.keyForAttribute) {
+            payloadKey = this.keyForAttribute(key);
+          }
+
+          json[payloadKey] = value;
         }
-
-        // if provided, use the mapping provided by `attrs` in
-        // the serializer
-        key = attrs && attrs[key] || (this.keyForAttribute ? this.keyForAttribute(key) : key);
-
-        json[key] = value;
       },
 
       /**
@@ -60762,18 +61090,25 @@ define("ember-data/lib/serializers/json_serializer",
       serializeBelongsTo: function(record, json, relationship) {
         var key = relationship.key;
 
-        var belongsTo = get(record, key);
+        if (this._canSerialize(key)) {
+          var belongsTo = get(record, key);
 
-        key = this.keyForRelationship ? this.keyForRelationship(key, "belongsTo") : key;
+          // if provided, use the mapping provided by `attrs` in
+          // the serializer
+          var payloadKey = this._getMappedKey(key);
+          if (payloadKey === key && this.keyForRelationship) {
+            payloadKey = this.keyForRelationship(key, "belongsTo");
+          }
 
-        if (isNone(belongsTo)) {
-          json[key] = belongsTo;
-        } else {
-          json[key] = get(belongsTo, 'id');
-        }
+          if (isNone(belongsTo)) {
+            json[payloadKey] = belongsTo;
+          } else {
+            json[payloadKey] = get(belongsTo, 'id');
+          }
 
-        if (relationship.options.polymorphic) {
-          this.serializePolymorphicType(record, json, relationship);
+          if (relationship.options.polymorphic) {
+            this.serializePolymorphicType(record, json, relationship);
+          }
         }
       },
 
@@ -60803,12 +61138,23 @@ define("ember-data/lib/serializers/json_serializer",
       */
       serializeHasMany: function(record, json, relationship) {
         var key = relationship.key;
-        var payloadKey = this.keyForRelationship ? this.keyForRelationship(key, "hasMany") : key;
-        var relationshipType = RelationshipChange.determineRelationshipType(record.constructor, relationship);
 
-        if (relationshipType === 'manyToNone' || relationshipType === 'manyToMany') {
-          json[payloadKey] = get(record, key).mapBy('id');
-          // TODO support for polymorphic manyToNone and manyToMany relationships
+        if (this._canSerialize(key)) {
+          var payloadKey;
+
+          // if provided, use the mapping provided by `attrs` in
+          // the serializer
+          payloadKey = this._getMappedKey(key);
+          if (payloadKey === key && this.keyForRelationship) {
+            payloadKey = this.keyForRelationship(key, "hasMany");
+          }
+
+          var relationshipType = RelationshipChange.determineRelationshipType(record.constructor, relationship);
+
+          if (relationshipType === 'manyToNone' || relationshipType === 'manyToMany') {
+            json[payloadKey] = get(record, key).mapBy('id');
+            // TODO support for polymorphic manyToNone and manyToMany relationships
+          }
         }
       },
 
@@ -60826,7 +61172,12 @@ define("ember-data/lib/serializers/json_serializer",
             var key = relationship.key,
                 belongsTo = get(record, key);
             key = this.keyForAttribute ? this.keyForAttribute(key) : key;
-            json[key + "_type"] = belongsTo.constructor.typeKey;
+
+            if (Ember.isNone(belongsTo)) {
+              json[key + "_type"] = null;
+            } else {
+              json[key + "_type"] = belongsTo.constructor.typeKey;
+            }
           }
         });
        ```
@@ -60888,10 +61239,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Array} array An array of deserialized objects
       */
-      extractFindAll: function(store, type, payload){
-        return this.extractArray(store, type, payload);
+      extractFindAll: function(store, type, payload, id, requestType){
+        return this.extractArray(store, type, payload, id, requestType);
       },
       /**
         `extractFindQuery` is a hook into the extract method used when a
@@ -60902,10 +61255,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Array} array An array of deserialized objects
       */
-      extractFindQuery: function(store, type, payload){
-        return this.extractArray(store, type, payload);
+      extractFindQuery: function(store, type, payload, id, requestType){
+        return this.extractArray(store, type, payload, id, requestType);
       },
       /**
         `extractFindMany` is a hook into the extract method used when a
@@ -60916,10 +61271,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Array} array An array of deserialized objects
       */
-      extractFindMany: function(store, type, payload){
-        return this.extractArray(store, type, payload);
+      extractFindMany: function(store, type, payload, id, requestType){
+        return this.extractArray(store, type, payload, id, requestType);
       },
       /**
         `extractFindHasMany` is a hook into the extract method used when a
@@ -60930,10 +61287,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Array} array An array of deserialized objects
       */
-      extractFindHasMany: function(store, type, payload){
-        return this.extractArray(store, type, payload);
+      extractFindHasMany: function(store, type, payload, id, requestType){
+        return this.extractArray(store, type, payload, id, requestType);
       },
 
       /**
@@ -60945,10 +61304,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Object} json The deserialized payload
       */
-      extractCreateRecord: function(store, type, payload) {
-        return this.extractSave(store, type, payload);
+      extractCreateRecord: function(store, type, payload, id, requestType) {
+        return this.extractSave(store, type, payload, id, requestType);
       },
       /**
         `extractUpdateRecord` is a hook into the extract method used when
@@ -60959,10 +61320,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Object} json The deserialized payload
       */
-      extractUpdateRecord: function(store, type, payload) {
-        return this.extractSave(store, type, payload);
+      extractUpdateRecord: function(store, type, payload, id, requestType) {
+        return this.extractSave(store, type, payload, id, requestType);
       },
       /**
         `extractDeleteRecord` is a hook into the extract method used when
@@ -60973,10 +61336,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Object} json The deserialized payload
       */
-      extractDeleteRecord: function(store, type, payload) {
-        return this.extractSave(store, type, payload);
+      extractDeleteRecord: function(store, type, payload, id, requestType) {
+        return this.extractSave(store, type, payload, id, requestType);
       },
 
       /**
@@ -60988,10 +61353,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Object} json The deserialized payload
       */
-      extractFind: function(store, type, payload) {
-        return this.extractSingle(store, type, payload);
+      extractFind: function(store, type, payload, id, requestType) {
+        return this.extractSingle(store, type, payload, id, requestType);
       },
       /**
         `extractFindBelongsTo` is a hook into the extract method used when
@@ -61002,10 +61369,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Object} json The deserialized payload
       */
-      extractFindBelongsTo: function(store, type, payload) {
-        return this.extractSingle(store, type, payload);
+      extractFindBelongsTo: function(store, type, payload, id, requestType) {
+        return this.extractSingle(store, type, payload, id, requestType);
       },
       /**
         `extractSave` is a hook into the extract method used when a call
@@ -61016,10 +61385,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Object} json The deserialized payload
       */
-      extractSave: function(store, type, payload) {
-        return this.extractSingle(store, type, payload);
+      extractSave: function(store, type, payload, id, requestType) {
+        return this.extractSingle(store, type, payload, id, requestType);
       },
 
       /**
@@ -61043,9 +61414,12 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Object} json The deserialized payload
       */
-      extractSingle: function(store, type, payload) {
+      extractSingle: function(store, type, payload, id, requestType) {
+        payload = this.normalizePayload(payload);
         return this.normalize(type, payload);
       },
 
@@ -61069,11 +61443,15 @@ define("ember-data/lib/serializers/json_serializer",
         @param {DS.Store} store
         @param {subclass of DS.Model} type
         @param {Object} payload
+        @param {String or Number} id
+        @param {String} requestType
         @return {Array} array An array of deserialized objects
       */
-      extractArray: function(store, type, arrayPayload) {
+      extractArray: function(store, type, arrayPayload, id, requestType) {
+        var normalizedPayload = this.normalizePayload(arrayPayload);
         var serializer = this;
-        return map.call(arrayPayload, function(singlePayload) {
+
+        return map.call(normalizedPayload, function(singlePayload) {
           return serializer.normalize(type, singlePayload);
         });
       },
@@ -61126,7 +61504,9 @@ define("ember-data/lib/serializers/json_serializer",
        @param {String} key
        @return {String} normalized key
       */
-
+      keyForAttribute: function(key){
+        return key;
+      },
 
       /**
        `keyForRelationship` can be used to define a custom key when
@@ -61149,6 +61529,10 @@ define("ember-data/lib/serializers/json_serializer",
        @return {String} normalized key
       */
 
+      keyForRelationship: function(key, type){
+        return key;
+      },
+
       // HELPERS
 
       /**
@@ -61164,11 +61548,9 @@ define("ember-data/lib/serializers/json_serializer",
         return transform;
       }
     });
-
-    __exports__["default"] = JSONSerializer;
   });
-define("ember-data/lib/serializers/rest_serializer", 
-  ["./json_serializer","ember-inflector/lib/system/string","exports"],
+define("ember-data/serializers/rest_serializer",
+  ["ember-data/serializers/json_serializer","ember-inflector/system/string","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     /**
@@ -61176,15 +61558,16 @@ define("ember-data/lib/serializers/rest_serializer",
     */
 
     var JSONSerializer = __dependency1__["default"];
-    var get = Ember.get, set = Ember.set;
+    var get = Ember.get;
+    var set = Ember.set;
     var forEach = Ember.ArrayPolyfills.forEach;
     var map = Ember.ArrayPolyfills.map;
-
-    var singularize = __dependency2__.singularize;
     var camelize = Ember.String.camelize;
 
+    var singularize = __dependency2__.singularize;
+
     function coerceId(id) {
-      return id == null ? null : id+'';
+      return id == null ? null : id + '';
     }
 
     /**
@@ -61200,7 +61583,7 @@ define("ember-data/lib/serializers/rest_serializer",
 
       ## Across the Board Normalization
 
-      There are also a number of hooks that you might find useful to defined
+      There are also a number of hooks that you might find useful to define
       across-the-board rules for your payload. These rules will be useful
       if your server is consistent, or if you're building an adapter for
       an infrastructure service, like Parse, and want to encode service
@@ -61227,7 +61610,7 @@ define("ember-data/lib/serializers/rest_serializer",
       @namespace DS
       @extends DS.JSONSerializer
     */
-    var RESTSerializer = JSONSerializer.extend({
+    __exports__["default"] = JSONSerializer.extend({
       /**
         If you want to do normalizations specific to some part of the payload, you
         can specify those under `normalizeHash`.
@@ -61356,65 +61739,6 @@ define("ember-data/lib/serializers/rest_serializer",
         return hash;
       },
 
-      /**
-        You can use this method to normalize all payloads, regardless of whether they
-        represent single records or an array.
-
-        For example, you might want to remove some extraneous data from the payload:
-
-        ```js
-        App.ApplicationSerializer = DS.RESTSerializer.extend({
-          normalizePayload: function(payload) {
-            delete payload.version;
-            delete payload.status;
-            return payload;
-          }
-        });
-        ```
-
-        @method normalizePayload
-        @param {Object} payload
-        @return {Object} the normalized payload
-      */
-      normalizePayload: function(payload) {
-        return payload;
-      },
-
-      /**
-        @method normalizeAttributes
-        @private
-      */
-      normalizeAttributes: function(type, hash) {
-        var payloadKey, key;
-
-        if (this.keyForAttribute) {
-          type.eachAttribute(function(key) {
-            payloadKey = this.keyForAttribute(key);
-            if (key === payloadKey) { return; }
-
-            hash[key] = hash[payloadKey];
-            delete hash[payloadKey];
-          }, this);
-        }
-      },
-
-      /**
-        @method normalizeRelationships
-        @private
-      */
-      normalizeRelationships: function(type, hash) {
-        var payloadKey, key;
-
-        if (this.keyForRelationship) {
-          type.eachRelationship(function(key, relationship) {
-            payloadKey = this.keyForRelationship(key, relationship.kind);
-            if (key === payloadKey) { return; }
-
-            hash[key] = hash[payloadKey];
-            delete hash[payloadKey];
-          }, this);
-        }
-      },
 
       /**
         Called when the server has returned a payload representing
@@ -61492,32 +61816,33 @@ define("ember-data/lib/serializers/rest_serializer",
         @param {String} recordId
         @return {Object} the primary response to the original request
       */
-      extractSingle: function(store, primaryType, payload, recordId) {
-        payload = this.normalizePayload(payload);
-        var primaryTypeName = primaryType.typeKey,
-            primaryRecord;
+      extractSingle: function(store, primaryType, rawPayload, recordId) {
+        var payload = this.normalizePayload(rawPayload);
+        var primaryTypeName = primaryType.typeKey;
+        var primaryRecord;
 
         for (var prop in payload) {
-          var typeName  = this.typeForRoot(prop),
-              type = store.modelFor(typeName),
-              isPrimary = type.typeKey === primaryTypeName;
+          var typeName  = this.typeForRoot(prop);
+          var type = store.modelFor(typeName);
+          var isPrimary = type.typeKey === primaryTypeName;
+          var value = payload[prop];
 
           // legacy support for singular resources
-          if (isPrimary && Ember.typeOf(payload[prop]) !== "array" ) {
-            primaryRecord = this.normalize(primaryType, payload[prop], prop);
+          if (isPrimary && Ember.typeOf(value) !== "array" ) {
+            primaryRecord = this.normalize(primaryType, value, prop);
             continue;
           }
 
           /*jshint loopfunc:true*/
-          forEach.call(payload[prop], function(hash) {
-            var typeName = this.typeForRoot(prop),
-                type = store.modelFor(typeName),
-                typeSerializer = store.serializerFor(type);
+          forEach.call(value, function(hash) {
+            var typeName = this.typeForRoot(prop);
+            var type = store.modelFor(typeName);
+            var typeSerializer = store.serializerFor(type);
 
             hash = typeSerializer.normalize(type, hash, prop);
 
-            var isFirstCreatedRecord = isPrimary && !recordId && !primaryRecord,
-                isUpdatedRecord = isPrimary && coerceId(hash.id) === recordId;
+            var isFirstCreatedRecord = isPrimary && !recordId && !primaryRecord;
+            var isUpdatedRecord = isPrimary && coerceId(hash.id) === recordId;
 
             // find the primary record.
             //
@@ -61593,7 +61918,7 @@ define("ember-data/lib/serializers/rest_serializer",
               comments.push(comment);
               postCache[comment.post_id].comments.push(comment);
               delete comment.post_id;
-            }
+            });
 
             payload = { comments: comments, posts: payload };
 
@@ -61636,25 +61961,24 @@ define("ember-data/lib/serializers/rest_serializer",
         @return {Array} The primary array that was returned in response
           to the original query.
       */
-      extractArray: function(store, primaryType, payload) {
-        payload = this.normalizePayload(payload);
-
-        var primaryTypeName = primaryType.typeKey,
-            primaryArray;
+      extractArray: function(store, primaryType, rawPayload) {
+        var payload = this.normalizePayload(rawPayload);
+        var primaryTypeName = primaryType.typeKey;
+        var primaryArray;
 
         for (var prop in payload) {
-          var typeKey = prop,
-              forcedSecondary = false;
+          var typeKey = prop;
+          var forcedSecondary = false;
 
           if (prop.charAt(0) === '_') {
             forcedSecondary = true;
             typeKey = prop.substr(1);
           }
 
-          var typeName = this.typeForRoot(typeKey),
-              type = store.modelFor(typeName),
-              typeSerializer = store.serializerFor(type),
-              isPrimary = (!forcedSecondary && (type.typeKey === primaryTypeName));
+          var typeName = this.typeForRoot(typeKey);
+          var type = store.modelFor(typeName);
+          var typeSerializer = store.serializerFor(type);
+          var isPrimary = (!forcedSecondary && (type.typeKey === primaryTypeName));
 
           /*jshint loopfunc:true*/
           var normalizedArray = map.call(payload[prop], function(hash) {
@@ -61702,13 +62026,13 @@ define("ember-data/lib/serializers/rest_serializer",
         @param {DS.Store} store
         @param {Object} payload
       */
-      pushPayload: function(store, payload) {
-        payload = this.normalizePayload(payload);
+      pushPayload: function(store, rawPayload) {
+        var payload = this.normalizePayload(rawPayload);
 
         for (var prop in payload) {
-          var typeName = this.typeForRoot(prop),
-              type = store.modelFor(typeName),
-              typeSerializer = store.serializerFor(type);
+          var typeName = this.typeForRoot(prop);
+          var type = store.modelFor(typeName);
+          var typeSerializer = store.serializerFor(type);
 
           /*jshint loopfunc:true*/
           var normalizedArray = map.call(Ember.makeArray(payload[prop]), function(hash) {
@@ -61827,7 +62151,7 @@ define("ember-data/lib/serializers/rest_serializer",
             var json = {
               POST_TTL: post.get('title'),
               POST_BDY: post.get('body'),
-              POST_CMS: post.get('comments').mapProperty('id')
+              POST_CMS: post.get('comments').mapBy('id')
             }
 
             if (options.includeId) {
@@ -61951,17 +62275,19 @@ define("ember-data/lib/serializers/rest_serializer",
         @param {Object} relationship
       */
       serializePolymorphicType: function(record, json, relationship) {
-        var key = relationship.key,
-            belongsTo = get(record, key);
+        var key = relationship.key;
+        var belongsTo = get(record, key);
         key = this.keyForAttribute ? this.keyForAttribute(key) : key;
-        json[key + "Type"] = belongsTo.constructor.typeKey;
+        if (Ember.isNone(belongsTo)) {
+          json[key + "Type"] = null;
+        } else {
+          json[key + "Type"] = Ember.String.camelize(belongsTo.constructor.typeKey);
+        }
       }
     });
-
-    __exports__["default"] = RESTSerializer;
   });
-define("ember-data/lib/setup-container", 
-  ["./initializers/store","./initializers/transforms","./initializers/store_injections","./initializers/data_adapter","../../../activemodel-adapter/lib/setup-container","exports"],
+define("ember-data/setup-container",
+  ["ember-data/initializers/store","ember-data/initializers/transforms","ember-data/initializers/store_injections","ember-data/initializers/data_adapter","activemodel-adapter/setup-container","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
     "use strict";
     var initializeStore = __dependency1__["default"];
@@ -61982,7 +62308,7 @@ define("ember-data/lib/setup-container",
       setupActiveModelContainer(container, application);
     };
   });
-define("ember-data/lib/system/adapter", 
+define("ember-data/system/adapter",
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -61990,10 +62316,19 @@ define("ember-data/lib/system/adapter",
       @module ember-data
     */
 
-    var get = Ember.get, set = Ember.set;
+    var get = Ember.get;
+    var set = Ember.set;
     var map = Ember.ArrayPolyfills.map;
 
-    var errorProps = ['description', 'fileName', 'lineNumber', 'message', 'name', 'number', 'stack'];
+    var errorProps = [
+      'description',
+      'fileName',
+      'lineNumber',
+      'message',
+      'name',
+      'number',
+      'stack'
+    ];
 
     /**
       A `DS.InvalidError` is used by an adapter to signal the external API
@@ -62035,14 +62370,15 @@ define("ember-data/lib/system/adapter",
       @class InvalidError
       @namespace DS
     */
-    var InvalidError = function(errors) {
+    function InvalidError(errors) {
       var tmp = Error.prototype.constructor.call(this, "The backend rejected the commit because it was invalid: " + Ember.inspect(errors));
       this.errors = errors;
 
       for (var i=0, l=errorProps.length; i<l; i++) {
         this[errorProps[i]] = tmp[errorProps[i]];
       }
-    };
+    }
+
     InvalidError.prototype = Ember.create(Error.prototype);
 
     /**
@@ -62109,7 +62445,7 @@ define("ember-data/lib/system/adapter",
         set the `defaultSerializer` property to be the name of the custom
         serializer.
 
-        Note the `defaultSerializer` serializer has a lower priority then
+        Note the `defaultSerializer` serializer has a lower priority than
         a model specific serializer (i.e. `PostSerializer`) or the
         `application` serializer.
 
@@ -62135,7 +62471,7 @@ define("ember-data/lib/system/adapter",
         ```javascript
         App.ApplicationAdapter = DS.Adapter.extend({
           find: function(store, type, id) {
-            var url = [type, id].join('/');
+            var url = [type.typeKey, id].join('/');
 
             return new Ember.RSVP.Promise(function(resolve, reject) {
               jQuery.getJSON(url).then(function(data) {
@@ -62395,42 +62731,43 @@ define("ember-data/lib/system/adapter",
       deleteRecord: Ember.required(Function),
 
       /**
-        Find multiple records at once.
+        By default the store will try to coalesce all `fetchRecord` calls within the same runloop
+        into as few requests as possible by calling groupRecordsForFindMany and passing it into a findMany call.
+        You can opt out of this behaviour by either not implementing the findMany hook or by setting
+        coalesceFindRequests to false
 
-        By default, it loops over the provided ids and calls `find` on each.
-        May be overwritten to improve performance and reduce the number of
-        server requests.
+        @property coalesceFindRequests
+        @type {boolean}
+      */
+      coalesceFindRequests: true,
 
-        Example
-
-        ```javascript
-        App.ApplicationAdapter = DS.Adapter.extend({
-          findMany: function(store, type, ids) {
-            var url = type;
-            return new Ember.RSVP.Promise(function(resolve, reject) {
-              jQuery.getJSON(url, {ids: ids}).then(function(data) {
-                Ember.run(null, resolve, data);
-              }, function(jqXHR) {
-                jqXHR.then = null; // tame jQuery's ill mannered promises
-                Ember.run(null, reject, jqXHR);
-              });
-            });
-          }
-        });
-        ```
+      /**
+        Find multiple records at once if coalesceFindRequests is true
 
         @method findMany
         @param {DS.Store} store
         @param {subclass of DS.Model} type   the DS.Model class of the records
         @param {Array}    ids
+        @param {Array} records
         @return {Promise} promise
       */
-      findMany: function(store, type, ids) {
-        var promises = map.call(ids, function(id) {
-          return this.find(store, type, id);
-        }, this);
 
-        return Ember.RSVP.all(promises);
+      /**
+        Organize records into groups, each of which is to be passed to separate
+        calls to `findMany`.
+
+        For example, if your api has nested URLs that depend on the parent, you will
+        want to group records by their parent.
+
+        The default implementation returns the records as a single group.
+
+        @method groupRecordsForFindMany
+        @param {Array} records
+        @return {Array}  an array of arrays of records, each of which is to be
+                          loaded separately by `findMany`.
+      */
+      groupRecordsForFindMany: function (store, records) {
+        return [records];
       }
     });
 
@@ -62438,8 +62775,8 @@ define("ember-data/lib/system/adapter",
     __exports__.Adapter = Adapter;
     __exports__["default"] = Adapter;
   });
-define("ember-data/lib/system/changes", 
-  ["./changes/relationship_change","exports"],
+define("ember-data/system/changes",
+  ["ember-data/system/changes/relationship_change","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     /**
@@ -62462,17 +62799,19 @@ define("ember-data/lib/system/changes",
     __exports__.OneToOneChange = OneToOneChange;
     __exports__.ManyToManyChange = ManyToManyChange;
   });
-define("ember-data/lib/system/changes/relationship_change", 
-  ["../model","exports"],
-  function(__dependency1__, __exports__) {
+define("ember-data/system/changes/relationship_change",
+  ["ember-data/system/model/model","ember-data/system/relationship-meta","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     /**
       @module ember-data
     */
 
-    var Model = __dependency1__.Model;
+    var Model = __dependency1__["default"];
+    var isSyncRelationship = __dependency2__.isSyncRelationship;
 
-    var get = Ember.get, set = Ember.set;
+    var get = Ember.get;
+    var set = Ember.set;
     var forEach = Ember.EnumerableUtils.forEach;
 
     /**
@@ -62502,9 +62841,9 @@ define("ember-data/lib/system/changes/relationship_change",
       @private
       @constructor
     */
-    var RelationshipChangeAdd = function(options){
+    function RelationshipChangeAdd(options){
       RelationshipChange.call(this, options);
-    };
+    }
 
     /**
       @class RelationshipChangeRemove
@@ -62512,9 +62851,9 @@ define("ember-data/lib/system/changes/relationship_change",
       @private
       @constructor
     */
-    var RelationshipChangeRemove = function(options){
+    function RelationshipChangeRemove(options){
       RelationshipChange.call(this, options);
-    };
+    }
 
     RelationshipChange.create = function(options) {
       return new RelationshipChange(options);
@@ -62535,14 +62874,13 @@ define("ember-data/lib/system/changes/relationship_change",
     var ManyToManyChange = {};
 
     RelationshipChange._createChange = function(options){
-      if(options.changeType === "add"){
+      if (options.changeType === 'add') {
         return RelationshipChangeAdd.create(options);
       }
-      if(options.changeType === "remove"){
+      if (options.changeType === 'remove') {
         return RelationshipChangeRemove.create(options);
       }
     };
-
 
     RelationshipChange.determineRelationshipType = function(recordType, knownSide){
       var knownKey = knownSide.key, key, otherKind;
@@ -62550,45 +62888,37 @@ define("ember-data/lib/system/changes/relationship_change",
 
       var inverse = recordType.inverseFor(knownKey);
 
-      if (inverse){
+      if (inverse) {
         key = inverse.name;
         otherKind = inverse.kind;
       }
 
-      if (!inverse){
-        return knownKind === "belongsTo" ? "oneToNone" : "manyToNone";
-      }
-      else{
-        if(otherKind === "belongsTo"){
-          return knownKind === "belongsTo" ? "oneToOne" : "manyToOne";
-        }
-        else{
-          return knownKind === "belongsTo" ? "oneToMany" : "manyToMany";
+      if (!inverse) {
+        return knownKind === 'belongsTo' ? 'oneToNone' : 'manyToNone';
+      } else {
+        if (otherKind === 'belongsTo') {
+          return knownKind === 'belongsTo' ? 'oneToOne' : 'manyToOne';
+        } else {
+          return knownKind === 'belongsTo' ? 'oneToMany' : 'manyToMany';
         }
       }
-
     };
 
     RelationshipChange.createChange = function(firstRecord, secondRecord, store, options){
       // Get the type of the child based on the child's client ID
       var firstRecordType = firstRecord.constructor, changeType;
       changeType = RelationshipChange.determineRelationshipType(firstRecordType, options);
-      if (changeType === "oneToMany"){
+      if (changeType === 'oneToMany') {
         return OneToManyChange.createChange(firstRecord, secondRecord, store, options);
-      }
-      else if (changeType === "manyToOne"){
+      } else if (changeType === 'manyToOne') {
         return OneToManyChange.createChange(secondRecord, firstRecord, store, options);
-      }
-      else if (changeType === "oneToNone"){
+      } else if (changeType === 'oneToNone') {
         return OneToNoneChange.createChange(firstRecord, secondRecord, store, options);
-      }
-      else if (changeType === "manyToNone"){
+      } else if (changeType === 'manyToNone') {
         return ManyToNoneChange.createChange(firstRecord, secondRecord, store, options);
-      }
-      else if (changeType === "oneToOne"){
+      } else if (changeType === 'oneToOne') {
         return OneToOneChange.createChange(firstRecord, secondRecord, store, options);
-      }
-      else if (changeType === "manyToMany"){
+      } else if (changeType === 'manyToMany') {
         return ManyToManyChange.createChange(firstRecord, secondRecord, store, options);
       }
     };
@@ -62596,13 +62926,13 @@ define("ember-data/lib/system/changes/relationship_change",
     OneToNoneChange.createChange = function(childRecord, parentRecord, store, options) {
       var key = options.key;
       var change = RelationshipChange._createChange({
-          parentRecord: parentRecord,
-          childRecord: childRecord,
-          firstRecord: childRecord,
-          store: store,
-          changeType: options.changeType,
-          firstRecordName: key,
-          firstRecordKind: "belongsTo"
+        parentRecord: parentRecord,
+        childRecord: childRecord,
+        firstRecord: childRecord,
+        store: store,
+        changeType: options.changeType,
+        firstRecordName: key,
+        firstRecordKind: 'belongsTo'
       });
 
       store.addRelationshipChangeFor(childRecord, key, parentRecord, null, change);
@@ -62613,13 +62943,13 @@ define("ember-data/lib/system/changes/relationship_change",
     ManyToNoneChange.createChange = function(childRecord, parentRecord, store, options) {
       var key = options.key;
       var change = RelationshipChange._createChange({
-          parentRecord: childRecord,
-          childRecord: parentRecord,
-          secondRecord: childRecord,
-          store: store,
-          changeType: options.changeType,
-          secondRecordName: options.key,
-          secondRecordKind: "hasMany"
+        parentRecord: childRecord,
+        childRecord: parentRecord,
+        secondRecord: childRecord,
+        store: store,
+        changeType: options.changeType,
+        secondRecordName: options.key,
+        secondRecordKind: 'hasMany'
       });
 
       store.addRelationshipChangeFor(childRecord, key, parentRecord, null, change);
@@ -62635,19 +62965,18 @@ define("ember-data/lib/system/changes/relationship_change",
       var key = options.key;
 
       var change = RelationshipChange._createChange({
-          parentRecord: parentRecord,
-          childRecord: childRecord,
-          firstRecord: childRecord,
-          secondRecord: parentRecord,
-          firstRecordKind: "hasMany",
-          secondRecordKind: "hasMany",
-          store: store,
-          changeType: options.changeType,
-          firstRecordName:  key
+        parentRecord: parentRecord,
+        childRecord: childRecord,
+        firstRecord: childRecord,
+        secondRecord: parentRecord,
+        firstRecordKind: 'hasMany',
+        secondRecordKind: 'hasMany',
+        store: store,
+        changeType: options.changeType,
+        firstRecordName:  key
       });
 
       store.addRelationshipChangeFor(childRecord, key, parentRecord, null, change);
-
 
       return change;
     };
@@ -62664,39 +62993,38 @@ define("ember-data/lib/system/changes/relationship_change",
       } else if (options.key) {
         key = options.key;
       } else {
-        Ember.assert("You must pass either a parentType or belongsToName option to OneToManyChange.forChildAndParent", false);
+        Ember.assert('You must pass either a parentType or belongsToName option to OneToManyChange.forChildAndParent', false);
       }
 
       var change = RelationshipChange._createChange({
-          parentRecord: parentRecord,
-          childRecord: childRecord,
-          firstRecord: childRecord,
-          secondRecord: parentRecord,
-          firstRecordKind: "belongsTo",
-          secondRecordKind: "belongsTo",
-          store: store,
-          changeType: options.changeType,
-          firstRecordName:  key
+        parentRecord: parentRecord,
+        childRecord: childRecord,
+        firstRecord: childRecord,
+        secondRecord: parentRecord,
+        firstRecordKind: 'belongsTo',
+        secondRecordKind: 'belongsTo',
+        store: store,
+        changeType: options.changeType,
+        firstRecordName:  key
       });
 
       store.addRelationshipChangeFor(childRecord, key, parentRecord, null, change);
-
 
       return change;
     };
 
     OneToOneChange.maintainInvariant = function(options, store, childRecord, key){
-      if (options.changeType === "add" && store.recordIsMaterialized(childRecord)) {
+      if (options.changeType === 'add' && store.recordIsMaterialized(childRecord)) {
         var oldParent = get(childRecord, key);
-        if (oldParent){
+        if (oldParent) {
           var correspondingChange = OneToOneChange.createChange(childRecord, oldParent, store, {
-              parentType: options.parentType,
-              hasManyName: options.hasManyName,
-              changeType: "remove",
-              key: options.key
-            });
+            parentType: options.parentType,
+            hasManyName: options.hasManyName,
+            changeType: 'remove',
+            key: options.key
+          });
           store.addRelationshipChangeFor(childRecord, key, options.parentRecord , null, correspondingChange);
-         correspondingChange.sync();
+          correspondingChange.sync();
         }
       }
     };
@@ -62714,38 +63042,36 @@ define("ember-data/lib/system/changes/relationship_change",
       } else if (options.key) {
         key = options.key;
       } else {
-        Ember.assert("You must pass either a parentType or belongsToName option to OneToManyChange.forChildAndParent", false);
+        Ember.assert('You must pass either a parentType or belongsToName option to OneToManyChange.forChildAndParent', false);
       }
 
       var change = RelationshipChange._createChange({
-          parentRecord: parentRecord,
-          childRecord: childRecord,
-          firstRecord: childRecord,
-          secondRecord: parentRecord,
-          firstRecordKind: "belongsTo",
-          secondRecordKind: "hasMany",
-          store: store,
-          changeType: options.changeType,
-          firstRecordName:  key
+        parentRecord: parentRecord,
+        childRecord: childRecord,
+        firstRecord: childRecord,
+        secondRecord: parentRecord,
+        firstRecordKind: 'belongsTo',
+        secondRecordKind: 'hasMany',
+        store: store,
+        changeType: options.changeType,
+        firstRecordName: key
       });
 
       store.addRelationshipChangeFor(childRecord, key, parentRecord, change.getSecondRecordName(), change);
 
-
       return change;
     };
 
-
     OneToManyChange.maintainInvariant = function(options, store, childRecord, key){
-      if (options.changeType === "add" && childRecord) {
+      if (options.changeType === 'add' && childRecord) {
         var oldParent = get(childRecord, key);
-        if (oldParent){
+        if (oldParent) {
           var correspondingChange = OneToManyChange.createChange(childRecord, oldParent, store, {
-              parentType: options.parentType,
-              hasManyName: options.hasManyName,
-              changeType: "remove",
-              key: options.key
-            });
+            parentType: options.parentType,
+            hasManyName: options.hasManyName,
+            changeType: 'remove',
+            key: options.key
+          });
           store.addRelationshipChangeFor(childRecord, key, options.parentRecord, correspondingChange.getSecondRecordName(), correspondingChange);
           correspondingChange.sync();
         }
@@ -62757,7 +63083,6 @@ define("ember-data/lib/system/changes/relationship_change",
       @namespace DS
     */
     RelationshipChange.prototype = {
-
       getSecondRecordName: function() {
         var name = this.secondRecordName, parent;
 
@@ -62780,8 +63105,7 @@ define("ember-data/lib/system/changes/relationship_change",
         @return {String}
       */
       getFirstRecordName: function() {
-        var name = this.firstRecordName;
-        return name;
+        return this.firstRecordName;
       },
 
       /**
@@ -62789,10 +63113,10 @@ define("ember-data/lib/system/changes/relationship_change",
         @private
       */
       destroy: function() {
-        var childRecord = this.childRecord,
-            belongsToName = this.getFirstRecordName(),
-            hasManyName = this.getSecondRecordName(),
-            store = this.store;
+        var childRecord = this.childRecord;
+        var belongsToName = this.getFirstRecordName();
+        var hasManyName = this.getSecondRecordName();
+        var store = this.store;
 
         store.removeRelationshipChangeFor(childRecord, belongsToName, this.parentRecord, hasManyName, this.changeType);
       },
@@ -62811,10 +63135,10 @@ define("ember-data/lib/system/changes/relationship_change",
 
       coalesce: function(){
         var relationshipPairs = this.store.relationshipChangePairsFor(this.firstRecord);
-        forEach(relationshipPairs, function(pair){
-          var addedChange = pair["add"];
-          var removedChange = pair["remove"];
-          if(addedChange && removedChange) {
+        forEach(relationshipPairs, function(pair) {
+          var addedChange = pair['add'];
+          var removedChange = pair['remove'];
+          if (addedChange && removedChange) {
             addedChange.destroy();
             removedChange.destroy();
           }
@@ -62825,87 +63149,76 @@ define("ember-data/lib/system/changes/relationship_change",
     RelationshipChangeAdd.prototype = Ember.create(RelationshipChange.create({}));
     RelationshipChangeRemove.prototype = Ember.create(RelationshipChange.create({}));
 
-    // the object is a value, and not a promise
-    function isValue(object) {
-      return typeof object === 'object' && (!object.then || typeof object.then !== 'function');
-    }
-
-    RelationshipChangeAdd.prototype.changeType = "add";
+    RelationshipChangeAdd.prototype.changeType = 'add';
     RelationshipChangeAdd.prototype.sync = function() {
-      var secondRecordName = this.getSecondRecordName(),
-          firstRecordName = this.getFirstRecordName(),
-          firstRecord = this.getFirstRecord(),
-          secondRecord = this.getSecondRecord();
+      var secondRecordName = this.getSecondRecordName();
+      var firstRecordName = this.getFirstRecordName();
+      var firstRecord = this.getFirstRecord();
+      var secondRecord = this.getSecondRecord();
 
       //Ember.assert("You specified a hasMany (" + hasManyName + ") on " + (!belongsToName && (newParent || oldParent || this.lastParent).constructor) + " but did not specify an inverse belongsTo on " + child.constructor, belongsToName);
       //Ember.assert("You specified a belongsTo (" + belongsToName + ") on " + child.constructor + " but did not specify an inverse hasMany on " + (!hasManyName && (newParent || oldParent || this.lastParentRecord).constructor), hasManyName);
 
       if (secondRecord instanceof Model && firstRecord instanceof Model) {
-        if(this.secondRecordKind === "belongsTo"){
-          secondRecord.suspendRelationshipObservers(function(){
+        if (this.secondRecordKind === 'belongsTo') {
+          secondRecord.suspendRelationshipObservers(function() {
             set(secondRecord, secondRecordName, firstRecord);
           });
-
-         }
-         else if(this.secondRecordKind === "hasMany"){
-          secondRecord.suspendRelationshipObservers(function(){
+        } else if (this.secondRecordKind === 'hasMany' && isSyncRelationship(secondRecord, secondRecordName)) {
+          secondRecord.suspendRelationshipObservers(function() {
             var relationship = get(secondRecord, secondRecordName);
-            if (isValue(relationship)) { relationship.addObject(firstRecord); }
+            relationship.addObject(firstRecord);
           });
         }
       }
 
       if (firstRecord instanceof Model && secondRecord instanceof Model && get(firstRecord, firstRecordName) !== secondRecord) {
-        if(this.firstRecordKind === "belongsTo"){
-          firstRecord.suspendRelationshipObservers(function(){
+        if (this.firstRecordKind === 'belongsTo') {
+          firstRecord.suspendRelationshipObservers(function() {
             set(firstRecord, firstRecordName, secondRecord);
           });
-        }
-        else if(this.firstRecordKind === "hasMany"){
-          firstRecord.suspendRelationshipObservers(function(){
+        } else if (this.firstRecordKind === 'hasMany' && isSyncRelationship(secondRecord, secondRecordName)) {
+          firstRecord.suspendRelationshipObservers(function() {
             var relationship = get(firstRecord, firstRecordName);
-            if (isValue(relationship)) { relationship.addObject(secondRecord); }
+             relationship.addObject(secondRecord);
           });
         }
       }
-
       this.coalesce();
     };
 
-    RelationshipChangeRemove.prototype.changeType = "remove";
+    RelationshipChangeRemove.prototype.changeType = 'remove';
     RelationshipChangeRemove.prototype.sync = function() {
-      var secondRecordName = this.getSecondRecordName(),
-          firstRecordName = this.getFirstRecordName(),
-          firstRecord = this.getFirstRecord(),
-          secondRecord = this.getSecondRecord();
+      var secondRecordName = this.getSecondRecordName();
+      var firstRecordName = this.getFirstRecordName();
+      var firstRecord = this.getFirstRecord();
+      var secondRecord = this.getSecondRecord();
 
       //Ember.assert("You specified a hasMany (" + hasManyName + ") on " + (!belongsToName && (newParent || oldParent || this.lastParent).constructor) + " but did not specify an inverse belongsTo on " + child.constructor, belongsToName);
       //Ember.assert("You specified a belongsTo (" + belongsToName + ") on " + child.constructor + " but did not specify an inverse hasMany on " + (!hasManyName && (newParent || oldParent || this.lastParentRecord).constructor), hasManyName);
 
       if (secondRecord instanceof Model && firstRecord instanceof Model) {
-        if(this.secondRecordKind === "belongsTo"){
-          secondRecord.suspendRelationshipObservers(function(){
+        if (this.secondRecordKind === 'belongsTo') {
+          secondRecord.suspendRelationshipObservers(function() {
             set(secondRecord, secondRecordName, null);
           });
-        }
-        else if(this.secondRecordKind === "hasMany"){
-          secondRecord.suspendRelationshipObservers(function(){
+        } else if (this.secondRecordKind === 'hasMany' && isSyncRelationship(secondRecord, secondRecordName)) {
+          secondRecord.suspendRelationshipObservers(function() {
             var relationship = get(secondRecord, secondRecordName);
-            if (isValue(relationship)) { relationship.removeObject(firstRecord); }
+            relationship.removeObject(firstRecord);
           });
         }
       }
 
       if (firstRecord instanceof Model && get(firstRecord, firstRecordName)) {
-        if(this.firstRecordKind === "belongsTo"){
-          firstRecord.suspendRelationshipObservers(function(){
+        if (this.firstRecordKind === 'belongsTo') {
+          firstRecord.suspendRelationshipObservers(function() {
             set(firstRecord, firstRecordName, null);
           });
-         }
-         else if(this.firstRecordKind === "hasMany"){
-           firstRecord.suspendRelationshipObservers(function(){
-             var relationship = get(firstRecord, firstRecordName);
-             if (isValue(relationship)) { relationship.removeObject(secondRecord); }
+        } else if (this.firstRecordKind === 'hasMany' && isSyncRelationship(firstRecord, firstRecordName)) {
+          firstRecord.suspendRelationshipObservers(function() {
+            var relationship = get(firstRecord, firstRecordName);
+            relationship.removeObject(secondRecord);
           });
         }
       }
@@ -62921,7 +63234,7 @@ define("ember-data/lib/system/changes/relationship_change",
     __exports__.OneToOneChange = OneToOneChange;
     __exports__.ManyToManyChange = ManyToManyChange;
   });
-define("ember-data/lib/system/container_proxy", 
+define("ember-data/system/container_proxy",
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -62933,17 +63246,17 @@ define("ember-data/lib/system/container_proxy",
       @namespace DS
       @private
     */
-    var ContainerProxy = function (container){
+    function ContainerProxy(container){
       this.container = container;
-    };
+    }
 
     ContainerProxy.prototype.aliasedFactory = function(path, preLookup) {
       var _this = this;
 
-      return {create: function(){ 
+      return {create: function(){
         if (preLookup) { preLookup(); }
 
-        return _this.container.lookup(path); 
+        return _this.container.lookup(path);
       }};
     };
 
@@ -62963,10 +63276,12 @@ define("ember-data/lib/system/container_proxy",
     };
 
     ContainerProxy.prototype.registerDeprecations = function(proxyPairs) {
-      for (var i = proxyPairs.length; i > 0; i--) {
-        var proxyPair = proxyPairs[i - 1],
-            deprecated = proxyPair['deprecated'],
-            valid = proxyPair['valid'];
+      var i, proxyPair, deprecated, valid, proxy;
+
+      for (i = proxyPairs.length; i > 0; i--) {
+        proxyPair = proxyPairs[i - 1];
+        deprecated = proxyPair['deprecated'];
+        valid = proxyPair['valid'];
 
         this.registerDeprecation(deprecated, valid);
       }
@@ -62974,8 +63289,8 @@ define("ember-data/lib/system/container_proxy",
 
     __exports__["default"] = ContainerProxy;
   });
-define("ember-data/lib/system/debug", 
-  ["./debug/debug_info","./debug/debug_adapter","exports"],
+define("ember-data/system/debug",
+  ["ember-data/system/debug/debug_info","ember-data/system/debug/debug_adapter","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     /**
@@ -62986,15 +63301,17 @@ define("ember-data/lib/system/debug",
 
     __exports__["default"] = DebugAdapter;
   });
-define("ember-data/lib/system/debug/debug_adapter", 
-  ["../model","exports"],
+define("ember-data/system/debug/debug_adapter",
+  ["ember-data/system/model","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     /**
       @module ember-data
     */
     var Model = __dependency1__.Model;
-    var get = Ember.get, capitalize = Ember.String.capitalize, underscore = Ember.String.underscore;
+    var get = Ember.get;
+    var capitalize = Ember.String.capitalize;
+    var underscore = Ember.String.underscore;
 
     /**
       Extend `Ember.DataAdapter` with ED specific code.
@@ -63004,7 +63321,7 @@ define("ember-data/lib/system/debug/debug_adapter",
       @extends Ember.DataAdapter
       @private
     */
-    var DebugAdapter = Ember.DataAdapter.extend({
+    __exports__["default"] = Ember.DataAdapter.extend({
       getFilters: function() {
         return [
           { name: 'isNew', desc: 'New' },
@@ -63018,7 +63335,12 @@ define("ember-data/lib/system/debug/debug_adapter",
       },
 
       columnsForType: function(type) {
-        var columns = [{ name: 'id', desc: 'Id' }], count = 0, self = this;
+        var columns = [{
+          name: 'id',
+          desc: 'Id'
+        }];
+        var count = 0;
+        var self = this;
         get(type, 'attributes').forEach(function(name, meta) {
             if (count++ > self.attributeLimit) { return false; }
             var desc = capitalize(underscore(name).replace('_', ' '));
@@ -63032,8 +63354,8 @@ define("ember-data/lib/system/debug/debug_adapter",
       },
 
       getRecordColumnValues: function(record) {
-        var self = this, count = 0,
-            columnValues = { id: get(record, 'id') };
+        var self = this, count = 0;
+        var columnValues = { id: get(record, 'id') };
 
         record.eachAttribute(function(key) {
           if (count++ > self.attributeLimit) {
@@ -63046,7 +63368,8 @@ define("ember-data/lib/system/debug/debug_adapter",
       },
 
       getRecordKeywords: function(record) {
-        var keywords = [], keys = Ember.A(['id']);
+        var keywords = [];
+        var keys = Ember.A(['id']);
         record.eachAttribute(function(key) {
           keys.push(key);
         });
@@ -63075,8 +63398,8 @@ define("ember-data/lib/system/debug/debug_adapter",
       },
 
       observeRecord: function(record, recordUpdated) {
-        var releaseMethods = Ember.A(), self = this,
-            keysToObserve = Ember.A(['id', 'isNew', 'isDirty']);
+        var releaseMethods = Ember.A(), self = this;
+        var keysToObserve = Ember.A(['id', 'isNew', 'isDirty']);
 
         record.eachAttribute(function(key) {
           keysToObserve.push(key);
@@ -63100,11 +63423,9 @@ define("ember-data/lib/system/debug/debug_adapter",
       }
 
     });
-
-    __exports__["default"] = DebugAdapter;
   });
-define("ember-data/lib/system/debug/debug_info", 
-  ["../model","exports"],
+define("ember-data/system/debug/debug_info",
+  ["ember-data/system/model","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var Model = __dependency1__.Model;
@@ -63177,8 +63498,8 @@ define("ember-data/lib/system/debug/debug_info",
 
     __exports__["default"] = Model;
   });
-define("ember-data/lib/system/model", 
-  ["./model/model","./model/attributes","./model/states","./model/errors","exports"],
+define("ember-data/system/model",
+  ["ember-data/system/model/model","ember-data/system/model/attributes","ember-data/system/model/states","ember-data/system/model/errors","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
     /**
@@ -63195,8 +63516,8 @@ define("ember-data/lib/system/model",
     __exports__.attr = attr;
     __exports__.Errors = Errors;
   });
-define("ember-data/lib/system/model/attributes", 
-  ["./model","exports"],
+define("ember-data/system/model/attributes",
+  ["ember-data/system/model/model","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var Model = __dependency1__["default"];
@@ -63257,7 +63578,7 @@ define("ember-data/lib/system/model/attributes",
         });
 
         return map;
-      }),
+      }).readOnly(),
 
       /**
         A map whose keys are the attributes of the model (properties
@@ -63300,7 +63621,7 @@ define("ember-data/lib/system/model/attributes",
         });
 
         return map;
-      }),
+      }).readOnly(),
 
       /**
         Iterates through the attributes of the model, calling the passed function on each
@@ -63465,7 +63786,7 @@ define("ember-data/lib/system/model/attributes",
       @return {Attribute}
     */
 
-    function attr(type, options) {
+    __exports__["default"] = function attr(type, options) {
       options = options || {};
 
       var meta = {
@@ -63503,15 +63824,14 @@ define("ember-data/lib/system/model/attributes",
       // invalidated from the state manager's setData
       // event.
       }).meta(meta);
-    }
-
-    __exports__["default"] = attr;
+    };
   });
-define("ember-data/lib/system/model/errors", 
+define("ember-data/system/model/errors",
   ["exports"],
   function(__exports__) {
     "use strict";
-    var get = Ember.get, isEmpty = Ember.isEmpty;
+    var get = Ember.get;
+    var isEmpty = Ember.isEmpty;
     var map = Ember.EnumerableUtils.map;
 
     /**
@@ -63524,6 +63844,9 @@ define("ember-data/lib/system/model/errors",
       Every DS.Model has an `errors` property that is an instance of
       `DS.Errors`. This can be used to display validation error
       messages returned from the server when a `record.save()` rejects.
+      This works automatically with `DS.ActiveModelAdapter`, but you
+      can implement [ajaxError](api/data/classes/DS.RESTAdapter.html#method_ajaxError)
+      in other adapters as well.
 
       For Example, if you had an `User` model that looked like this:
 
@@ -63586,7 +63909,7 @@ define("ember-data/lib/system/model/errors",
       @uses Ember.Enumerable
       @uses Ember.Evented
      */
-    var Errors = Ember.Object.extend(Ember.Enumerable, Ember.Evented, {
+    __exports__["default"] = Ember.Object.extend(Ember.Enumerable, Ember.Evented, {
       /**
         Register with target handler
 
@@ -63847,11 +64170,9 @@ define("ember-data/lib/system/model/errors",
         return !isEmpty(this.errorsFor(attribute));
       }
     });
-
-    __exports__["default"] = Errors;
   });
-define("ember-data/lib/system/model/model", 
-  ["./states","./errors","../store","exports"],
+define("ember-data/system/model/model",
+  ["ember-data/system/model/states","ember-data/system/model/errors","ember-data/system/store","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
     "use strict";
     var RootState = __dependency1__["default"];
@@ -63861,14 +64182,31 @@ define("ember-data/lib/system/model/model",
       @module ember-data
     */
 
-    var get = Ember.get, set = Ember.set,
-        merge = Ember.merge,
-        Promise = Ember.RSVP.Promise;
+    var get = Ember.get;
+    var set = Ember.set;
+    var merge = Ember.merge;
+    var Promise = Ember.RSVP.Promise;
+    var forEach = Ember.ArrayPolyfills.forEach;
 
     var JSONSerializer;
     var retrieveFromCurrentState = Ember.computed('currentState', function(key, value) {
       return get(get(this, 'currentState'), key);
     }).readOnly();
+
+    var _extractPivotNameCache = Object.create(null);
+    var _splitOnDotCache = Object.create(null);
+
+    function splitOnDot(name) {
+      return _splitOnDotCache[name] || (
+        _splitOnDotCache[name] = name.split('.')
+      );
+    }
+
+    function extractPivotName(name) {
+      return _extractPivotNameCache[name] || (
+        _extractPivotNameCache[name] = splitOnDot(name)[0]
+      );
+    }
 
     /**
 
@@ -64209,7 +64547,7 @@ define("ember-data/lib/system/model/model",
         @return {Object} A JSON representation of the object.
       */
       toJSON: function(options) {
-        if (!JSONSerializer) { JSONSerializer = requireModule("ember-data/lib/serializers/json_serializer")["default"]; }
+        if (!JSONSerializer) { JSONSerializer = requireModule("ember-data/serializers/json_serializer")["default"]; }
         // container is for lazy transform lookups
         var serializer = JSONSerializer.create({ container: this.container });
         return serializer.serialize(this, options);
@@ -64308,17 +64646,16 @@ define("ember-data/lib/system/model/model",
         // POSSIBLE TODO: Remove this code and replace with
         // always having direct references to state objects
 
-        var pivotName = name.split(".", 1),
-            currentState = get(this, 'currentState'),
-            state = currentState;
+        var pivotName = extractPivotName(name);
+        var currentState = get(this, 'currentState');
+        var state = currentState;
 
         do {
           if (state.exit) { state.exit(this); }
           state = state.parentState;
         } while (!state.hasOwnProperty(pivotName));
 
-        var path = name.split(".");
-
+        var path = splitOnDot(name);
         var setups = [], enters = [], i, l;
 
         for (i=0, l=path.length; i<l; i++) {
@@ -64403,13 +64740,13 @@ define("ember-data/lib/system/model/model",
         App.ModelDeleteRoute = Ember.Route.extend({
           actions: {
             softDelete: function() {
-              this.get('model').deleteRecord();
+              this.controller.get('model').deleteRecord();
             },
             confirm: function() {
-              this.get('model').save();
+              this.controller.get('model').save();
             },
             undo: function() {
-              this.get('model').rollback();
+              this.controller.get('model').rollback();
             }
           }
         });
@@ -64431,7 +64768,7 @@ define("ember-data/lib/system/model/model",
           actions: {
             delete: function() {
               var controller = this.controller;
-              this.get('model').destroyRecord().then(function() {
+              controller.get('model').destroyRecord().then(function() {
                 controller.transitionToRoute('model.index');
               });
             }
@@ -64485,6 +64822,67 @@ define("ember-data/lib/system/model/model",
       },
 
       /**
+        When a find request is triggered on the store, the user can optionally passed in
+        attributes and relationships to be preloaded. These are meant to behave as if they
+        came back from the server, expect the user obtained them out of band and is informing
+        the store of their existence. The most common use case is for supporting client side
+        nested URLs, such as `/posts/1/comments/2` so the user can do
+        `store.find('comment', 2, {post:1})` without having to fetch the post.
+
+        Preloaded data can be attributes and relationships passed in either as IDs or as actual
+        models.
+
+        @method _preloadData
+        @private
+        @param {Object} preload
+      */
+      _preloadData: function(preload) {
+        var record = this;
+        //TODO(Igor) consider the polymorphic case
+        forEach.call(Ember.keys(preload), function(key) {
+          var preloadValue = get(preload, key);
+          var relationshipMeta = record.constructor.metaForProperty(key);
+          if (relationshipMeta.isRelationship) {
+            record._preloadRelationship(key, preloadValue);
+          } else {
+            get(record, '_data')[key] = preloadValue;
+          }
+        });
+      },
+
+      _preloadRelationship: function(key, preloadValue) {
+        var relationshipMeta = this.constructor.metaForProperty(key);
+        var type = relationshipMeta.type;
+        if (relationshipMeta.kind === 'hasMany'){
+          this._preloadHasMany(key, preloadValue, type);
+        } else {
+          this._preloadBelongsTo(key, preloadValue, type);
+        }
+      },
+
+      _preloadHasMany: function(key, preloadValue, type) {
+        Ember.assert("You need to pass in an array to set a hasMany property on a record", Ember.isArray(preloadValue));
+        var record = this;
+
+        forEach.call(preloadValue, function(recordToPush) {
+          recordToPush = record._convertStringOrNumberIntoRecord(recordToPush, type);
+          get(record, key).pushObject(recordToPush);
+        });
+      },
+
+      _preloadBelongsTo: function(key, preloadValue, type){
+        var recordToPush = this._convertStringOrNumberIntoRecord(preloadValue, type);
+        set(this, key, recordToPush);
+      },
+
+      _convertStringOrNumberIntoRecord: function(value, type) {
+        if (Ember.typeOf(value) === 'string' || Ember.typeOf(value) === 'number'){
+          return this.store.recordForId(type, value);
+        }
+        return value;
+      },
+
+      /**
         Returns an object, whose keys are changed properties, and value is
         an [oldProp, newProp] array.
 
@@ -64506,10 +64904,10 @@ define("ember-data/lib/system/model/model",
           and value is an [oldProp, newProp] array.
       */
       changedAttributes: function() {
-        var oldData = get(this, '_data'),
-            newData = get(this, '_attributes'),
-            diffData = {},
-            prop;
+        var oldData = get(this, '_data');
+        var newData = get(this, '_attributes');
+        var diffData = {};
+        var prop;
 
         for (prop in newData) {
           diffData[prop] = [oldData[prop], newData[prop]];
@@ -64762,7 +65160,9 @@ define("ember-data/lib/system/model/model",
         this._inFlightAttributes = this._attributes;
         this._attributes = {};
 
-        return PromiseObject.create({ promise: resolver.promise });
+        return PromiseObject.create({
+          promise: resolver.promise
+        });
       },
 
       /**
@@ -64778,7 +65178,7 @@ define("ember-data/lib/system/model/model",
         App.ModelViewRoute = Ember.Route.extend({
           actions: {
             reload: function() {
-              this.get('model').reload();
+              this.controller.get('model').reload();
             }
           }
         });
@@ -64792,8 +65192,7 @@ define("ember-data/lib/system/model/model",
       reload: function() {
         set(this, 'isReloading', true);
 
-        var  record = this;
-
+        var record = this;
         var promiseLabel = "DS: Model#reload of " + this;
         var promise = new Promise(function(resolve){
            record.send('reloadRecord', resolve);
@@ -64806,7 +65205,9 @@ define("ember-data/lib/system/model/model",
           throw reason;
         }, "DS: Model#reload complete, update flags");
 
-        return PromiseObject.create({ promise: promise });
+        return PromiseObject.create({
+          promise: promise
+        });
       },
 
       // FOR USE DURING COMMIT PROCESS
@@ -64871,7 +65272,7 @@ define("ember-data/lib/system/model/model",
       },
 
       _triggerDeferredTriggers: function() {
-        for (var i=0, l=this._deferredTriggers.length; i<l; i++) {
+        for (var i=0, l= this._deferredTriggers.length; i<l; i++) {
           this.trigger.apply(this, this._deferredTriggers[i]);
         }
 
@@ -64881,11 +65282,16 @@ define("ember-data/lib/system/model/model",
       willDestroy: function() {
         this._super();
         this.clearRelationships();
+      },
+
+      // This is a temporary solution until we refactor DS.Model to not
+      // rely on the data property.
+      willMergeMixin: function(props) {
+        Ember.assert('`data` is a reserved property name on DS.Model objects. Please choose a different property name for ' + this.constructor.toString(), !props.data);
       }
     });
 
     Model.reopenClass({
-
       /**
         Alias DS.Model's `create` method to `_create`. This allows us to create DS.Model
         instances from within the store, but if end users accidentally call `create()`
@@ -64915,7 +65321,7 @@ define("ember-data/lib/system/model/model",
 
     __exports__["default"] = Model;
   });
-define("ember-data/lib/system/model/states", 
+define("ember-data/system/model/states",
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -64923,7 +65329,8 @@ define("ember-data/lib/system/model/states",
       @module ember-data
     */
 
-    var get = Ember.get, set = Ember.set;
+    var get = Ember.get;
+    var set = Ember.set;
     /*
       This file encapsulates the various states that a record can transition
       through during its lifecycle.
@@ -64937,7 +65344,7 @@ define("ember-data/lib/system/model/states",
       it would be in the `root.loaded.created.uncommitted` state.  If a
       record has had local modifications made to it that are in the
       process of being saved, the record would be in the
-      `root.loaded.updated.inFlight` state. (These state paths will be
+      `root.loaded.updated.inFlight` state. (This state paths will be
       explained in more detail below.)
 
       Events are sent by the record or its store to the record's
@@ -64981,7 +65388,7 @@ define("ember-data/lib/system/model/states",
         * loading
       ```
 
-      The `DS.Model` states are themselves stateless. What we mean is
+      The `DS.Model` states are themselves stateless. What that means is
       that, the hierarchical states that each of *those* points to is a
       shared data structure. For performance reasons, instead of each
       record getting its own copy of the hierarchy of states, each record
@@ -65173,6 +65580,10 @@ define("ember-data/lib/system/model/states",
       uncommitted: {
         // EVENTS
         didSetProperty: didSetProperty,
+
+        //TODO(Igor) reloading now triggers a
+        //loadingData event, though it seems fine?
+        loadingData: Ember.K,
 
         propertyWasReset: function(record, name) {
           var stillDirty = false;
@@ -65456,14 +65867,18 @@ define("ember-data/lib/system/model/states",
         // FLAGS
         isLoaded: true,
 
+        //TODO(Igor) Reloading now triggers a loadingData event,
+        //but it should be ok?
+        loadingData: Ember.K,
+
         // SUBSTATES
 
         // If there are no local changes to a record, it remains
         // in the `saved` state.
         saved: {
           setup: function(record) {
-            var attrs = record._attributes,
-                isDirty = false;
+            var attrs = record._attributes;
+            var isDirty = false;
 
             for (var prop in attrs) {
               if (attrs.hasOwnProperty(prop)) {
@@ -65648,8 +66063,8 @@ define("ember-data/lib/system/model/states",
 
     __exports__["default"] = RootState;
   });
-define("ember-data/lib/system/record_array_manager", 
-  ["./record_arrays","exports"],
+define("ember-data/system/record_array_manager",
+  ["ember-data/system/record_arrays","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     /**
@@ -65660,7 +66075,8 @@ define("ember-data/lib/system/record_array_manager",
     var FilteredRecordArray = __dependency1__.FilteredRecordArray;
     var AdapterPopulatedRecordArray = __dependency1__.AdapterPopulatedRecordArray;
     var ManyArray = __dependency1__.ManyArray;
-    var get = Ember.get, set = Ember.set;
+    var get = Ember.get;
+    var set = Ember.set;
     var forEach = Ember.EnumerableUtils.forEach;
 
     /**
@@ -65669,7 +66085,7 @@ define("ember-data/lib/system/record_array_manager",
       @private
       @extends Ember.Object
     */
-    var RecordArrayManager = Ember.Object.extend({
+    __exports__["default"] = Ember.Object.extend({
       init: function() {
         this.filteredRecordArrays = Ember.MapWithDefault.create({
           defaultValue: function() { return []; }
@@ -65725,9 +66141,9 @@ define("ember-data/lib/system/record_array_manager",
       },
 
       _recordWasChanged: function (record) {
-        var type = record.constructor,
-            recordArrays = this.filteredRecordArrays.get(type),
-            filter;
+        var type = record.constructor;
+        var recordArrays = this.filteredRecordArrays.get(type);
+        var filter;
 
         forEach(recordArrays, function(array) {
           filter = get(array, 'filterFunction');
@@ -65768,8 +66184,10 @@ define("ember-data/lib/system/record_array_manager",
         var recordArrays = this.recordArraysForRecord(record);
 
         if (shouldBeInArray) {
-          recordArrays.add(array);
-          array.addRecord(record);
+          if (!recordArrays.has(array)) {
+            array.pushRecord(record);
+            recordArrays.add(array);
+          }
         } else if (!shouldBeInArray) {
           recordArrays.remove(array);
           array.removeRecord(record);
@@ -65789,8 +66207,8 @@ define("ember-data/lib/system/record_array_manager",
         @param filter
       */
       updateFilter: function(array, type, filter) {
-        var typeMap = this.store.typeMapFor(type),
-            records = typeMap.records, record;
+        var typeMap = this.store.typeMapFor(type);
+        var records = typeMap.records, record;
 
         for (var i=0, l=records.length; i<l; i++) {
           record = records[i];
@@ -65954,11 +66372,9 @@ define("ember-data/lib/system/record_array_manager",
 
       return result;
     }
-
-    __exports__["default"] = RecordArrayManager;
   });
-define("ember-data/lib/system/record_arrays", 
-  ["./record_arrays/record_array","./record_arrays/filtered_record_array","./record_arrays/adapter_populated_record_array","./record_arrays/many_array","exports"],
+define("ember-data/system/record_arrays",
+  ["ember-data/system/record_arrays/record_array","ember-data/system/record_arrays/filtered_record_array","ember-data/system/record_arrays/adapter_populated_record_array","ember-data/system/record_arrays/many_array","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
     /**
@@ -65975,8 +66391,8 @@ define("ember-data/lib/system/record_arrays",
     __exports__.AdapterPopulatedRecordArray = AdapterPopulatedRecordArray;
     __exports__.ManyArray = ManyArray;
   });
-define("ember-data/lib/system/record_arrays/adapter_populated_record_array", 
-  ["./record_array","exports"],
+define("ember-data/system/record_arrays/adapter_populated_record_array",
+  ["ember-data/system/record_arrays/record_array","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var RecordArray = __dependency1__["default"];
@@ -65984,7 +66400,16 @@ define("ember-data/lib/system/record_arrays/adapter_populated_record_array",
       @module ember-data
     */
 
-    var get = Ember.get, set = Ember.set;
+    var get = Ember.get;
+    var set = Ember.set;
+
+    function cloneNull(source) {
+      var clone = Object.create(null);
+      for (var key in source) {
+        clone[key] = source[key];
+      }
+      return clone;
+    }
 
     /**
       Represents an ordered list of records whose order and membership is
@@ -65996,7 +66421,7 @@ define("ember-data/lib/system/record_arrays/adapter_populated_record_array",
       @namespace DS
       @extends DS.RecordArray
     */
-    var AdapterPopulatedRecordArray = RecordArray.extend({
+    __exports__["default"] = RecordArray.extend({
       query: null,
 
       replace: function() {
@@ -66010,15 +66435,15 @@ define("ember-data/lib/system/record_arrays/adapter_populated_record_array",
         @param {Array} data
       */
       load: function(data) {
-        var store = get(this, 'store'),
-            type = get(this, 'type'),
-            records = store.pushMany(type, data),
-            meta = store.metadataFor(type);
+        var store = get(this, 'store');
+        var type = get(this, 'type');
+        var records = store.pushMany(type, data);
+        var meta = store.metadataFor(type);
 
         this.setProperties({
           content: Ember.A(records),
           isLoaded: true,
-          meta: Ember.copy(meta)
+          meta: cloneNull(meta)
         });
 
         records.forEach(function(record) {
@@ -66029,11 +66454,9 @@ define("ember-data/lib/system/record_arrays/adapter_populated_record_array",
         Ember.run.once(this, 'trigger', 'didLoad');
       }
     });
-
-    __exports__["default"] = AdapterPopulatedRecordArray;
   });
-define("ember-data/lib/system/record_arrays/filtered_record_array", 
-  ["./record_array","exports"],
+define("ember-data/system/record_arrays/filtered_record_array",
+  ["ember-data/system/record_arrays/record_array","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var RecordArray = __dependency1__["default"];
@@ -66054,7 +66477,7 @@ define("ember-data/lib/system/record_arrays/filtered_record_array",
       @namespace DS
       @extends DS.RecordArray
     */
-    var FilteredRecordArray = RecordArray.extend({
+    __exports__["default"] = RecordArray.extend({
       /**
         The filterFunction is a function used to test records from the store to
         determine if they should be part of the record array.
@@ -66102,11 +66525,9 @@ define("ember-data/lib/system/record_arrays/filtered_record_array",
         Ember.run.once(this, this._updateFilter);
       }, 'filterFunction')
     });
-
-    __exports__["default"] = FilteredRecordArray;
   });
-define("ember-data/lib/system/record_arrays/many_array", 
-  ["./record_array","../changes","exports"],
+define("ember-data/system/record_arrays/many_array",
+  ["ember-data/system/record_arrays/record_array","ember-data/system/changes","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     var RecordArray = __dependency1__["default"];
@@ -66159,7 +66580,7 @@ define("ember-data/lib/system/record_arrays/many_array",
       @namespace DS
       @extends DS.RecordArray
     */
-    var ManyArray = RecordArray.extend({
+    __exports__["default"] = RecordArray.extend({
       init: function() {
         this._super.apply(this, arguments);
         this._changesToSync = Ember.OrderedSet.create();
@@ -66228,12 +66649,12 @@ define("ember-data/lib/system/record_arrays/many_array",
         @private
       */
       fetch: function() {
-        var records = get(this, 'content'),
-            store = get(this, 'store'),
-            owner = get(this, 'owner');
+        var records = get(this, 'content');
+        var store = get(this, 'store');
+        var owner = get(this, 'owner');
 
-        var unloadedRecords = records.filterProperty('isEmpty', true);
-        store.fetchMany(unloadedRecords, owner);
+        var unloadedRecords = records.filterBy('isEmpty', true);
+        store.scheduleFetchMany(unloadedRecords, owner);
       },
 
       // Overrides Ember.Array's replace method to implement
@@ -66252,8 +66673,8 @@ define("ember-data/lib/system/record_arrays/many_array",
       },
 
       arrayContentWillChange: function(index, removed, added) {
-        var owner = get(this, 'owner'),
-            name = get(this, 'name');
+        var owner = get(this, 'owner');
+        var name = get(this, 'name');
 
         if (!owner._suspendedRelationships) {
           // This code is the first half of code that continues inside
@@ -66285,9 +66706,9 @@ define("ember-data/lib/system/record_arrays/many_array",
       arrayContentDidChange: function(index, removed, added) {
         this._super.apply(this, arguments);
 
-        var owner = get(this, 'owner'),
-            name = get(this, 'name'),
-            store = get(this, 'store');
+        var owner = get(this, 'owner');
+        var name = get(this, 'name');
+        var store = get(this, 'store');
 
         if (!owner._suspendedRelationships) {
           // This code is the second half of code that started in
@@ -66328,10 +66749,10 @@ define("ember-data/lib/system/record_arrays/many_array",
         @return {DS.Model} record
       */
       createRecord: function(hash) {
-        var owner = get(this, 'owner'),
-            store = get(owner, 'store'),
-            type = get(this, 'type'),
-            record;
+        var owner = get(this, 'owner');
+        var store = get(owner, 'store');
+        var type = get(this, 'type');
+        var record;
 
         Ember.assert("You cannot add '" + type.typeKey + "' records to this polymorphic relationship.", !get(this, 'isPolymorphic'));
 
@@ -66341,11 +66762,9 @@ define("ember-data/lib/system/record_arrays/many_array",
         return record;
       }
     });
-
-    __exports__["default"] = ManyArray;
   });
-define("ember-data/lib/system/record_arrays/record_array", 
-  ["../store","exports"],
+define("ember-data/system/record_arrays/record_array",
+  ["ember-data/system/store","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     /**
@@ -66353,7 +66772,8 @@ define("ember-data/lib/system/record_arrays/record_array",
     */
 
     var PromiseArray = __dependency1__.PromiseArray;
-    var get = Ember.get, set = Ember.set;
+    var get = Ember.get;
+    var set = Ember.set;
 
     /**
       A record array is an array that contains records of a certain type. The record
@@ -66368,7 +66788,7 @@ define("ember-data/lib/system/record_arrays/record_array",
       @uses Ember.Evented
     */
 
-    var RecordArray = Ember.ArrayProxy.extend(Ember.Evented, {
+    __exports__["default"] = Ember.ArrayProxy.extend(Ember.Evented, {
       /**
         The model type contained by this record array.
 
@@ -66461,14 +66881,14 @@ define("ember-data/lib/system/record_arrays/record_array",
       update: function() {
         if (get(this, 'isUpdating')) { return; }
 
-        var store = get(this, 'store'),
-            type = get(this, 'type');
+        var store = get(this, 'store');
+        var type = get(this, 'type');
 
         return store.fetchAll(type, this);
       },
 
       /**
-        Adds a record to the `RecordArray`.
+        Adds a record to the `RecordArray` without duplicates
 
         @method addRecord
         @private
@@ -66477,6 +66897,18 @@ define("ember-data/lib/system/record_arrays/record_array",
       addRecord: function(record) {
         get(this, 'content').addObject(record);
       },
+
+      /**
+        Adds a record to the `RecordArray`, but allows duplicates
+
+        @method pushRecord
+        @private
+        @param {DS.Model} record
+      */
+      pushRecord: function(record) {
+        get(this, 'content').pushObject(record);
+      },
+
 
       /**
         Removes a record to the `RecordArray`.
@@ -66531,11 +66963,9 @@ define("ember-data/lib/system/record_arrays/record_array",
         this._super();
       }
     });
-
-    __exports__["default"] = RecordArray;
   });
-define("ember-data/lib/system/relationship-meta", 
-  ["../../../ember-inflector/lib/system","exports"],
+define("ember-data/system/relationship-meta",
+  ["ember-inflector/system","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var singularize = __dependency1__.singularize;
@@ -66567,10 +66997,17 @@ define("ember-data/lib/system/relationship-meta",
       };
     }
 
-    __exports__.relationshipFromMeta = relationshipFromMeta;
+    __exports__.relationshipFromMeta = relationshipFromMeta;function isSyncRelationship(record, relationshipName) {
+      var meta = Ember.meta(record);
+      var desc = meta.descs[relationshipName];
+
+      return desc && !desc._meta.options.async;
+    }
+
+    __exports__.isSyncRelationship = isSyncRelationship;
   });
-define("ember-data/lib/system/relationships", 
-  ["./relationships/belongs_to","./relationships/has_many","../system/relationships/ext","exports"],
+define("ember-data/system/relationships",
+  ["./relationships/belongs_to","./relationships/has_many","ember-data/system/relationships/ext","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
     "use strict";
     /**
@@ -66584,13 +67021,13 @@ define("ember-data/lib/system/relationships",
     __exports__.belongsTo = belongsTo;
     __exports__.hasMany = hasMany;
   });
-define("ember-data/lib/system/relationships/belongs_to", 
-  ["../model","../store","../changes","../relationship-meta","exports"],
+define("ember-data/system/relationships/belongs_to",
+  ["ember-data/system/model","ember-data/system/store","ember-data/system/changes","ember-data/system/relationship-meta","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
-    var get = Ember.get, set = Ember.set,
-        isNone = Ember.isNone;
-
+    var get = Ember.get;
+    var set = Ember.set;
+    var isNone = Ember.isNone;
     var Promise = Ember.RSVP.Promise;
 
     var Model = __dependency1__.Model;
@@ -66598,6 +67035,7 @@ define("ember-data/lib/system/relationships/belongs_to",
     var RelationshipChange = __dependency3__.RelationshipChange;
     var relationshipFromMeta = __dependency4__.relationshipFromMeta;
     var typeForRelationshipMeta = __dependency4__.typeForRelationshipMeta;
+    var isSyncRelationship = __dependency4__.isSyncRelationship;
 
     /**
       @module ember-data
@@ -66605,10 +67043,10 @@ define("ember-data/lib/system/relationships/belongs_to",
 
     function asyncBelongsTo(type, options, meta) {
       return Ember.computed('data', function(key, value) {
-        var data = get(this, 'data'),
-            store = get(this, 'store'),
-            promiseLabel = "DS: Async belongsTo " + this + " : " + key,
-            promise;
+        var data = get(this, 'data');
+        var store = get(this, 'store');
+        var promiseLabel = "DS: Async belongsTo " + this + " : " + key;
+        var promise;
 
         meta.key = key;
 
@@ -66619,11 +67057,17 @@ define("ember-data/lib/system/relationships/belongs_to",
           });
         }
 
-        var link = data.links && data.links[key],
-            belongsTo = data[key];
+        var link = data.links && data.links[key];
+        var belongsTo = data[key];
 
-        if(!isNone(belongsTo)) {
-          promise = store.fetchRecord(belongsTo) || Promise.cast(belongsTo, promiseLabel);
+        if (!isNone(belongsTo)) {
+          var inverse = this.constructor.inverseFor(key);
+          //but for now only in the oneToOne case
+          if (inverse && inverse.kind === 'belongsTo'){
+            set(belongsTo, inverse.name, this);
+          }
+          //TODO(Igor) after OR doesn't seem that will be called
+          promise = store.findById(belongsTo.constructor, belongsTo.get('id')) || Promise.cast(belongsTo, promiseLabel);
           return PromiseObject.create({
             promise: promise
           });
@@ -66708,8 +67152,9 @@ define("ember-data/lib/system/relationships/belongs_to",
       }
 
       return Ember.computed('data', function(key, value) {
-        var data = get(this, 'data'),
-            store = get(this, 'store'), belongsTo, typeClass;
+        var data = get(this, 'data');
+        var store = get(this, 'store');
+        var belongsTo, typeClass;
 
         if (typeof type === 'string') {
           typeClass = store.modelFor(type);
@@ -66726,7 +67171,7 @@ define("ember-data/lib/system/relationships/belongs_to",
 
         if (isNone(belongsTo)) { return null; }
 
-        store.fetchRecord(belongsTo);
+        store.findById(belongsTo.constructor, belongsTo.get('id'));
 
         return belongsTo;
       }).meta(meta);
@@ -66749,12 +67194,16 @@ define("ember-data/lib/system/relationships/belongs_to",
         @param key
       */
       belongsToWillChange: Ember.beforeObserver(function(record, key) {
-        if (get(record, 'isLoaded')) {
+        if (get(record, 'isLoaded') && isSyncRelationship(record, key)) {
           var oldParent = get(record, key);
 
           if (oldParent) {
-            var store = get(record, 'store'),
-                change = RelationshipChange.createChange(record, oldParent, store, { key: key, kind: "belongsTo", changeType: "remove" });
+            var store = get(record, 'store');
+            var change = RelationshipChange.createChange(record, oldParent, store, {
+              key: key,
+              kind: 'belongsTo',
+              changeType: 'remove'
+            });
 
             change.sync();
             this._changesToSync[key] = change;
@@ -66774,8 +67223,12 @@ define("ember-data/lib/system/relationships/belongs_to",
           var newParent = get(record, key);
 
           if (newParent) {
-            var store = get(record, 'store'),
-                change = RelationshipChange.createChange(record, newParent, store, { key: key, kind: "belongsTo", changeType: "add" });
+            var store = get(record, 'store');
+            var change = RelationshipChange.createChange(record, newParent, store, {
+              key: key,
+              kind: 'belongsTo',
+              changeType: 'add'
+            });
 
             change.sync();
           }
@@ -66787,8 +67240,8 @@ define("ember-data/lib/system/relationships/belongs_to",
 
     __exports__["default"] = belongsTo;
   });
-define("ember-data/lib/system/relationships/ext", 
-  ["../../../../ember-inflector/lib/system","../relationship-meta","../model"],
+define("ember-data/system/relationships/ext",
+  ["ember-inflector/system","ember-data/system/relationship-meta","ember-data/system/model"],
   function(__dependency1__, __dependency2__, __dependency3__) {
     "use strict";
     var singularize = __dependency1__.singularize;
@@ -66796,7 +67249,8 @@ define("ember-data/lib/system/relationships/ext",
     var relationshipFromMeta = __dependency2__.relationshipFromMeta;
     var Model = __dependency3__.Model;
 
-    var get = Ember.get, set = Ember.set;
+    var get = Ember.get;
+    var set = Ember.set;
 
     /**
       @module ember-data
@@ -66841,7 +67295,7 @@ define("ember-data/lib/system/relationships/ext",
       */
       didDefineProperty: function(proto, key, value) {
         // Check if the value being set is a computed property.
-        if (value instanceof Ember.Descriptor) {
+        if (value instanceof Ember.ComputedProperty) {
 
           // If it is, get the metadata for the relationship. This is
           // populated by the `DS.belongsTo` helper when it is creating
@@ -66908,17 +67362,24 @@ define("ember-data/lib/system/relationships/ext",
 
         if (options.inverse === null) { return null; }
 
-        var inverseName, inverseKind;
+        var inverseName, inverseKind, inverse;
 
         if (options.inverse) {
           inverseName = options.inverse;
-          inverseKind = Ember.get(inverseType, 'relationshipsByName').get(inverseName).kind;
+          inverse = Ember.get(inverseType, 'relationshipsByName').get(inverseName);
+
+          Ember.assert("We found no inverse relationships by the name of '" + inverseName + "' on the '" + inverseType.typeKey +
+            "' model. This is most likely due to a missing attribute on your model definition.", !Ember.isNone(inverse));
+
+          inverseKind = inverse.kind;
         } else {
           var possibleRelationships = findPossibleInverses(this, inverseType);
 
           if (possibleRelationships.length === 0) { return null; }
 
-          Ember.assert("You defined the '" + name + "' relationship on " + this + ", but multiple possible inverse relationships of type " + this + " were found on " + inverseType + ". Look at http://emberjs.com/guides/models/defining-models/#toc_explicit-inverses for how to explicitly specify inverses", possibleRelationships.length === 1);
+          Ember.assert("You defined the '" + name + "' relationship on " + this + ", but multiple possible inverse relationships of type " +
+            this + " were found on " + inverseType + ". Look at http://emberjs.com/guides/models/defining-models/#toc_explicit-inverses for how to explicitly specify inverses",
+            possibleRelationships.length === 1);
 
           inverseName = possibleRelationships[0].name;
           inverseKind = possibleRelationships[0].kind;
@@ -66989,19 +67450,21 @@ define("ember-data/lib/system/relationships/ext",
 
         // Loop through each computed property on the class
         this.eachComputedProperty(function(name, meta) {
-
           // If the computed property is a relationship, add
           // it to the map.
           if (meta.isRelationship) {
             meta.key = name;
             var relationshipsForType = map.get(typeForRelationshipMeta(this.store, meta));
 
-            relationshipsForType.push({ name: name, kind: meta.kind });
+            relationshipsForType.push({
+              name: name,
+              kind: meta.kind
+            });
           }
         });
 
         return map;
-      }).cacheable(false),
+      }).cacheable(false).readOnly(),
 
       /**
         A hash containing lists of the model's relationships, grouped
@@ -67033,7 +67496,10 @@ define("ember-data/lib/system/relationships/ext",
         @readOnly
       */
       relationshipNames: Ember.computed(function() {
-        var names = { hasMany: [], belongsTo: [] };
+        var names = {
+          hasMany: [],
+          belongsTo: []
+        };
 
         this.eachComputedProperty(function(name, meta) {
           if (meta.isRelationship) {
@@ -67073,8 +67539,8 @@ define("ember-data/lib/system/relationships/ext",
         @readOnly
       */
       relatedTypes: Ember.computed(function() {
-        var type,
-            types = Ember.A();
+        var type;
+        var types = Ember.A();
 
         // Loop through each computed property on the class,
         // and create an array of the unique types involved
@@ -67094,7 +67560,7 @@ define("ember-data/lib/system/relationships/ext",
         });
 
         return types;
-      }).cacheable(false),
+      }).cacheable(false).readOnly(),
 
       /**
         A map whose keys are the relationships of a model and whose values are
@@ -67140,7 +67606,7 @@ define("ember-data/lib/system/relationships/ext",
         });
 
         return map;
-      }).cacheable(false),
+      }).cacheable(false).readOnly(),
 
       /**
         A map whose keys are the fields of the model and whose values are strings
@@ -67189,7 +67655,7 @@ define("ember-data/lib/system/relationships/ext",
         });
 
         return map;
-      }),
+      }).readOnly(),
 
       /**
         Given a callback, iterates over each of the relationships in the model,
@@ -67240,8 +67706,8 @@ define("ember-data/lib/system/relationships/ext",
       }
     });
   });
-define("ember-data/lib/system/relationships/has_many", 
-  ["../store","../relationship-meta","exports"],
+define("ember-data/system/relationships/has_many",
+  ["ember-data/system/store","ember-data/system/relationship-meta","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     /**
@@ -67249,34 +67715,80 @@ define("ember-data/lib/system/relationships/has_many",
     */
 
     var PromiseArray = __dependency1__.PromiseArray;
-    var get = Ember.get, set = Ember.set, setProperties = Ember.setProperties;
+
     var relationshipFromMeta = __dependency2__.relationshipFromMeta;
     var typeForRelationshipMeta = __dependency2__.typeForRelationshipMeta;
 
+    var get = Ember.get;
+    var set = Ember.set;
+    var setProperties = Ember.setProperties;
+    var map = Ember.EnumerableUtils.map;
+
+    /**
+      Returns a computed property that synchronously returns a ManyArray for
+      this relationship. If not all of the records in this relationship are
+      loaded, it will raise an exception.
+    */
+
+    function syncHasMany(type, options, meta) {
+      return Ember.computed('data', function(key) {
+        return buildRelationship(this, key, options, function(store, data) {
+          // Configure the metadata for the computed property to contain
+          // the key.
+          meta.key = key;
+
+          var records = data[key];
+
+          Ember.assert("You looked up the '" + key + "' relationship on '" + this + "' but some of the associated records were not loaded. Either make sure they are all loaded together with the parent record, or specify that the relationship is async (`DS.hasMany({ async: true })`)", Ember.A(records).isEvery('isEmpty', false));
+
+          return store.findMany(this, data[key], typeForRelationshipMeta(store, meta));
+        });
+      }).meta(meta).readOnly();
+    }
+
+    /**
+      Returns a computed property that itself returns a promise that resolves to a
+      ManyArray.
+     */
+
     function asyncHasMany(type, options, meta) {
       return Ember.computed('data', function(key) {
-        var relationship = this._relationships[key],
-            promiseLabel = "DS: Async hasMany " + this + " : " + key;
-
+        // Configure the metadata for the computed property to contain
+        // the key.
         meta.key = key;
 
-        if (!relationship) {
+        var relationship = buildRelationship(this, key, options, function(store, data) {
+          var link = data.links && data.links[key];
+          var rel;
+          var promiseLabel = "DS: Async hasMany " + this + " : " + key;
           var resolver = Ember.RSVP.defer(promiseLabel);
-          relationship = buildRelationship(this, key, options, function(store, data) {
-            var link = data.links && data.links[key];
-            var rel;
-            if (link) {
-              rel = store.findHasMany(this, link, relationshipFromMeta(store, meta), resolver);
-            } else {
-              rel = store.findMany(this, data[key], typeForRelationshipMeta(store, meta), resolver);
+
+          if (link) {
+            rel = store.findHasMany(this, link, relationshipFromMeta(store, meta), resolver);
+          } else {
+
+            //This is a temporary workaround for setting owner on the relationship
+            //until single source of truth lands. It only works for OneToMany atm
+            var records = data[key];
+            var inverse = this.constructor.inverseFor(key);
+            var owner = this;
+            if (inverse && records) {
+              if (inverse.kind === 'belongsTo'){
+                map(records, function(record){
+                  set(record, inverse.name, owner);
+                });
+              }
             }
-            // cache the promise so we can use it
-            // when we come back and don't need to rebuild
-            // the relationship.
-            set(rel, 'promise', resolver.promise);
-            return rel;
-          });
-        }
+
+            rel = store.findMany(owner, data[key], typeForRelationshipMeta(store, meta), resolver);
+          }
+
+          // Cache the promise so we can use it when we come back and don't
+          // need to rebuild the relationship.
+          set(rel, 'promise', resolver.promise);
+
+          return rel;
+        });
 
         var promise = relationship.get('promise').then(function() {
           return relationship;
@@ -67288,13 +67800,19 @@ define("ember-data/lib/system/relationships/has_many",
       }).meta(meta).readOnly();
     }
 
+    /*
+      Builds the ManyArray for a relationship using the provided callback,
+      but only if it had not been created previously. After building, it
+      sets some metadata on the created ManyArray, such as the record which
+      owns it and the name of the relationship.
+    */
     function buildRelationship(record, key, options, callback) {
       var rels = record._relationships;
 
       if (rels[key]) { return rels[key]; }
 
-      var data = get(record, 'data'),
-          store = get(record, 'store');
+      var data = get(record, 'data');
+      var store = get(record, 'store');
 
       var relationship = rels[key] = callback.call(record, store, data);
 
@@ -67303,30 +67821,6 @@ define("ember-data/lib/system/relationships/has_many",
         name: key,
         isPolymorphic: options.polymorphic
       });
-    }
-
-    function hasRelationship(type, options) {
-      options = options || {};
-
-      var meta = {
-        type: type,
-        isRelationship: true,
-        options: options,
-        kind: 'hasMany',
-        key: null
-      };
-
-      if (options.async) {
-        return asyncHasMany(type, options, meta);
-      }
-
-      return Ember.computed('data', function(key) {
-        return buildRelationship(this, key, options, function(store, data) {
-          var records = data[key];
-          Ember.assert("You looked up the '" + key + "' relationship on '" + this + "' but some of the associated records were not loaded. Either make sure they are all loaded together with the parent record, or specify that the relationship is async (`DS.hasMany({ async: true })`)", Ember.A(records).everyProperty('isEmpty', false));
-          return store.findMany(this, data[key], typeForRelationshipMeta(store, meta));
-        });
-      }).meta(meta).readOnly();
     }
 
     /**
@@ -67412,13 +67906,32 @@ define("ember-data/lib/system/relationships/has_many",
         options = type;
         type = undefined;
       }
-      return hasRelationship(type, options);
+
+      options = options || {};
+
+      // Metadata about relationships is stored on the meta of
+      // the relationship. This is used for introspection and
+      // serialization. Note that `key` is populated lazily
+      // the first time the CP is called.
+      var meta = {
+        type: type,
+        isRelationship: true,
+        options: options,
+        kind: 'hasMany',
+        key: null
+      };
+
+      if (options.async) {
+        return asyncHasMany(type, options, meta);
+      } else {
+        return syncHasMany(type, options, meta);
+      }
     }
 
     __exports__["default"] = hasMany;
   });
-define("ember-data/lib/system/store", 
-  ["./adapter","ember-inflector/lib/system/string","exports"],
+define("ember-data/system/store",
+  ["ember-data/system/adapter","ember-inflector/system/string","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     /*globals Ember*/
@@ -67431,7 +67944,9 @@ define("ember-data/lib/system/store",
     var InvalidError = __dependency1__.InvalidError;
     var Adapter = __dependency1__.Adapter;
     var singularize = __dependency2__.singularize;
-    var get = Ember.get, set = Ember.set;
+
+    var get = Ember.get;
+    var set = Ember.set;
     var once = Ember.run.once;
     var isNone = Ember.isNone;
     var forEach = Ember.EnumerableUtils.forEach;
@@ -67487,14 +68002,16 @@ define("ember-data/lib/system/store",
       for a specific id, use `DS.Store`'s `find()` method:
 
       ```javascript
-      var person = store.find('person', 123);
+      store.find('person', 123).then(function (person) {
+      });
       ```
 
       If your application has multiple `DS.Store` instances (an unusual case), you can
       specify which store should be used:
 
       ```javascript
-      var person = store.find('person', 123);
+      store.find('person', 123).then(function (person) {
+      });
       ```
 
       By default, the store will talk to your backend using a standard
@@ -67502,17 +68019,15 @@ define("ember-data/lib/system/store",
       backend by specifying a custom adapter:
 
       ```javascript
-       MyApp.store = DS.Store.create({
-         adapter: 'MyApp.CustomAdapter'
-       });
-       ```
+      MyApp.ApplicationAdapter = MyApp.CustomAdapter
+      ```
 
       You can learn more about writing a custom adapter by reading the `DS.Adapter`
       documentation.
 
       ### Store createRecord() vs. push() vs. pushPayload() vs. update()
 
-      The store provides multiple ways to create new records object. They have
+      The store provides multiple ways to create new record objects. They have
       some subtle differences in their use which are detailed below:
 
       [createRecord](#method_createRecord) is used for creating new
@@ -67555,13 +68070,15 @@ define("ember-data/lib/system/store",
       */
       init: function() {
         // internal bookkeeping; not observable
-        if (!RecordArrayManager) { RecordArrayManager = requireModule("ember-data/lib/system/record_array_manager")["default"]; }
+        if (!RecordArrayManager) { RecordArrayManager = requireModule("ember-data/system/record_array_manager")["default"]; }
         this.typeMaps = {};
         this.recordArrayManager = RecordArrayManager.create({
           store: this
         });
         this._relationshipChanges = {};
         this._pendingSave = [];
+        //Used to keep track of all the find requests that need to be coalesced
+        this._pendingFetch = Ember.Map.create();
       },
 
       /**
@@ -67654,10 +68171,9 @@ define("ember-data/lib/system/store",
           newly created record.
         @return {DS.Model} record
       */
-      createRecord: function(type, properties) {
-        type = this.modelFor(type);
-
-        properties = copy(properties) || {};
+      createRecord: function(typeName, inputProperties) {
+        var type = this.modelFor(typeName);
+        var properties = copy(inputProperties) || {};
 
         // If the passed properties do not include a primary key,
         // give the adapter an opportunity to generate one. Typically,
@@ -67771,6 +68287,31 @@ define("ember-data/lib/system/store",
 
         ---
 
+        You can optionally preload specific attributes and relationships that you know of
+        by passing them as the third argument to find.
+
+        For example, if your Ember route looks like `/posts/1/comments/2` and you API route
+        for the comment also looks like `/posts/1/comments/2` if you want to fetch the comment
+        without fetching the post you can pass in the post to the `find` call:
+
+        ```javascript
+        store.find('comment', 2, {post: 1});
+        ```
+
+        If you have access to the post model you can also pass the model itself:
+
+        ```javascript
+        store.find('post', 1).then(function (myPostModel) {
+          store.find('comment', 2, {post: myPostModel});
+        });
+        ```
+
+        This way, your adapter's `find` or `buildURL` method will be able to look up the
+        relationship on the record and construct the nested URL without having to first
+        fetch the post.
+
+        ---
+
         To find all records for a type, call `find` with no additional parameters:
 
         ```javascript
@@ -67799,7 +68340,7 @@ define("ember-data/lib/system/store",
         @param {Object|String|Integer|null} id
         @return {Promise} promise
       */
-      find: function(type, id) {
+      find: function(type, id, preload) {
         Ember.assert("You need to pass a type to the store's find method", arguments.length >= 1);
         Ember.assert("You may not pass `" + id + "` as id to the store's find method", arguments.length === 1 || !Ember.isNone(id));
 
@@ -67812,7 +68353,7 @@ define("ember-data/lib/system/store",
           return this.findQuery(type, id);
         }
 
-        return this.findById(type, coerceId(id));
+        return this.findById(type, coerceId(id), preload);
       },
 
       /**
@@ -67824,11 +68365,22 @@ define("ember-data/lib/system/store",
         @param {String|Integer} id
         @return {Promise} promise
       */
-      findById: function(type, id) {
-        type = this.modelFor(type);
+      findById: function(typeName, id, preload) {
+        var fetchedRecord;
 
+        var type = this.modelFor(typeName);
         var record = this.recordForId(type, id);
-        var fetchedRecord = this.fetchRecord(record);
+
+        if (preload) {
+          record._preloadData(preload);
+        }
+
+        if (get(record, 'isEmpty')) {
+          fetchedRecord = this.scheduleFetch(record);
+          //TODO double check about reloading
+        } else if (get(record, 'isLoading')){
+          fetchedRecord = record._loadingPromise;
+        }
 
         return promiseObject(fetchedRecord || record, "DS: Store#findById " + type + " with id: " + id);
       },
@@ -67846,6 +68398,7 @@ define("ember-data/lib/system/store",
       findByIds: function(type, ids) {
         var store = this;
         var promiseLabel = "DS: Store#findByIds " + type;
+
         return promiseArray(Ember.RSVP.all(map(ids, function(id) {
           return store.findById(type, id);
         })).then(Ember.A, null, "DS: Store#findByIds of " + type + " complete"));
@@ -67862,37 +68415,141 @@ define("ember-data/lib/system/store",
         @return {Promise} promise
       */
       fetchRecord: function(record) {
-        if (isNone(record)) { return null; }
-        if (record._loadingPromise) { return record._loadingPromise; }
-        if (!get(record, 'isEmpty')) { return null; }
-
-        var type = record.constructor,
-            id = get(record, 'id');
-
+        var type = record.constructor;
+        var id = get(record, 'id');
         var adapter = this.adapterFor(type);
 
         Ember.assert("You tried to find a record but you have no adapter (for " + type + ")", adapter);
         Ember.assert("You tried to find a record but your adapter (for " + type + ") does not implement 'find'", adapter.find);
 
-        var promise = _find(adapter, this, type, id);
-        record.loadingData(promise);
+        var promise = _find(adapter, this, type, id, record);
         return promise;
+      },
+
+      scheduleFetchMany: function(records) {
+        return Ember.RSVP.all(map(records, this.scheduleFetch, this));
+      },
+
+      scheduleFetch: function(record) {
+        var type = record.constructor;
+        if (isNone(record)) { return null; }
+        if (record._loadingPromise) { return record._loadingPromise; }
+
+        var resolver = Ember.RSVP.defer('Fetching ' + type + 'with id: ' + record.get('id'));
+        var recordResolverPair = {
+          record: record,
+          resolver: resolver
+        };
+        var promise = resolver.promise;
+
+        record.loadingData(promise);
+
+        if (!this._pendingFetch.get(type)){
+          this._pendingFetch.set(type, [recordResolverPair]);
+        } else {
+          this._pendingFetch.get(type).push(recordResolverPair);
+        }
+        Ember.run.scheduleOnce('afterRender', this, this.flushAllPendingFetches);
+
+        return promise;
+      },
+
+      flushAllPendingFetches: function(){
+        if (this.isDestroyed || this.isDestroying) {
+          return;
+        }
+
+        this._pendingFetch.forEach(this._flushPendingFetchForType, this);
+        this._pendingFetch = Ember.Map.create();
+      },
+
+      _flushPendingFetchForType: function (type, recordResolverPairs) {
+        var store = this;
+        var adapter = store.adapterFor(type);
+        var shouldCoalesce = !!adapter.findMany && adapter.coalesceFindRequests;
+        var records = Ember.A(recordResolverPairs).mapBy('record');
+        var resolvers = Ember.A(recordResolverPairs).mapBy('resolver');
+
+        function _fetchRecord(recordResolverPair) {
+          recordResolverPair.resolver.resolve(store.fetchRecord(recordResolverPair.record));
+        }
+
+        function resolveFoundRecords(records) {
+          forEach(records, function(record){
+            var pair = Ember.A(recordResolverPairs).findBy('record', record);
+            if (pair){
+              var resolver = pair.resolver;
+              resolver.resolve(record);
+            }
+          });
+        }
+
+        function makeMissingRecordsRejector(requestedRecords) {
+          return function rejectMissingRecords(resolvedRecords) {
+            var missingRecords = requestedRecords.without(resolvedRecords);
+            rejectRecords(missingRecords);
+          };
+        }
+
+        function makeRecordsRejector(records) {
+          return function (error) {
+            rejectRecords(records, error);
+          };
+        }
+
+        function rejectRecords(records, error) {
+          forEach(records, function(record){
+            var pair = Ember.A(recordResolverPairs).findBy('record', record);
+            if (pair){
+              var resolver = pair.resolver;
+              resolver.reject(error);
+            }
+          });
+        }
+
+        if (recordResolverPairs.length === 1) {
+          _fetchRecord(recordResolverPairs[0]);
+        } else if (shouldCoalesce) {
+          var groups = adapter.groupRecordsForFindMany(this, records);
+          forEach(groups, function (groupOfRecords) {
+            var requestedRecords = Ember.A(groupOfRecords);
+            var ids = requestedRecords.mapBy('id');
+            if (ids.length > 1) {
+              _findMany(adapter, store, type, ids, requestedRecords).
+                then(resolveFoundRecords).
+                then(makeMissingRecordsRejector(requestedRecords)).
+                then(null, makeRecordsRejector(requestedRecords));
+            } else if (ids.length === 1) {
+              var pair = Ember.A(recordResolverPairs).findBy('record', groupOfRecords[0]);
+              _fetchRecord(pair);
+            } else {
+              Ember.assert("You cannot return an empty array from adapter's method groupRecordsForFindMany", false);
+            }
+          });
+        } else {
+          forEach(recordResolverPairs, _fetchRecord);
+        }
       },
 
       /**
         Get a record by a given type and ID without triggering a fetch.
 
-        This method will synchronously return the record if it's available.
-        Otherwise, it will return null.
+        This method will synchronously return the record if it is available in the store,
+        otherwise it will return `null`. A record is available if it has been fetched earlier, or
+        pushed manually into the store.
+
+        _Note: This is an synchronous method and does not return a promise._
 
         ```js
         var post = store.getById('post', 1);
+
+        post.get('id'); // 1
         ```
 
         @method getById
         @param {String or subclass of DS.Model} type
         @param {String|Integer} id
-        @param {DS.Model} record
+        @return {DS.Model|null} record
       */
       getById: function(type, id) {
         if (this.hasRecordForId(type, id)) {
@@ -67915,62 +68572,15 @@ define("ember-data/lib/system/store",
         @return {Promise} promise
       */
       reloadRecord: function(record) {
-        var type = record.constructor,
-            adapter = this.adapterFor(type),
-            id = get(record, 'id');
+        var type = record.constructor;
+        var adapter = this.adapterFor(type);
+        var id = get(record, 'id');
 
         Ember.assert("You cannot reload a record without an ID", id);
         Ember.assert("You tried to reload a record but you have no adapter (for " + type + ")", adapter);
         Ember.assert("You tried to reload a record but your adapter does not implement `find`", adapter.find);
 
-        return _find(adapter, this, type, id);
-      },
-
-      /**
-        This method takes a list of records, groups the records by type,
-        converts the records into IDs, and then invokes the adapter's `findMany`
-        method.
-
-        The records are grouped by type to invoke `findMany` on adapters
-        for each unique type in records.
-
-        It is used both by a brand new relationship (via the `findMany`
-        method) or when the data underlying an existing relationship
-        changes.
-
-        @method fetchMany
-        @private
-        @param {Array} records
-        @param {DS.Model} owner
-        @return {Promise} promise
-      */
-      fetchMany: function(records, owner) {
-        if (!records.length) {
-          return Ember.RSVP.resolve(records);
-        }
-
-        // Group By Type
-        var recordsByTypeMap = Ember.MapWithDefault.create({
-          defaultValue: function() { return Ember.A(); }
-        });
-
-        forEach(records, function(record) {
-          recordsByTypeMap.get(record.constructor).push(record);
-        });
-
-        var promises = [];
-
-        forEach(recordsByTypeMap, function(type, records) {
-          var ids = records.mapProperty('id'),
-              adapter = this.adapterFor(type);
-
-          Ember.assert("You tried to load many records but you have no adapter (for " + type + ")", adapter);
-          Ember.assert("You tried to load many records but your adapter does not implement `findMany`", adapter.findMany);
-
-          promises.push(_findMany(adapter, this, type, ids, owner));
-        }, this);
-
-        return Ember.RSVP.all(promises);
+        return this.scheduleFetch(record);
       },
 
       /**
@@ -67981,9 +68591,9 @@ define("ember-data/lib/system/store",
         @param {String|Integer} id
         @return {Boolean}
       */
-      hasRecordForId: function(type, id) {
-        id = coerceId(id);
-        type = this.modelFor(type);
+      hasRecordForId: function(typeName, inputId) {
+        var type = this.modelFor(typeName);
+        var id = coerceId(inputId);
         return !!this.typeMapFor(type).idToRecord[id];
       },
 
@@ -67997,14 +68607,13 @@ define("ember-data/lib/system/store",
         @param {String|Integer} id
         @return {DS.Model} record
       */
-      recordForId: function(type, id) {
-        type = this.modelFor(type);
+      recordForId: function(typeName, inputId) {
+        var type = this.modelFor(typeName);
+        var id = coerceId(inputId);
+        var idToRecord = this.typeMapFor(type).idToRecord;
+        var record = idToRecord[id];
 
-        id = coerceId(id);
-
-        var record = this.typeMapFor(type).idToRecord[id];
-
-        if (!record) {
+        if (!record || !idToRecord[id]) {
           record = this.buildRecord(type, id);
         }
 
@@ -68020,17 +68629,11 @@ define("ember-data/lib/system/store",
         @param {Resolver} resolver
         @return {DS.ManyArray} records
       */
-      findMany: function(owner, records, type, resolver) {
-        type = this.modelFor(type);
-
-        records = Ember.A(records);
-
-        var unloadedRecords = records.filterProperty('isEmpty', true),
-            manyArray = this.recordArrayManager.createManyArray(type, records);
-
-        forEach(unloadedRecords, function(record) {
-          record.loadingData();
-        });
+      findMany: function(owner, inputRecords, typeName, resolver) {
+        var type = this.modelFor(typeName);
+        var records = Ember.A(inputRecords);
+        var unloadedRecords = records.filterProperty('isEmpty', true);
+        var manyArray = this.recordArrayManager.createManyArray(type, records);
 
         manyArray.loadingRecordsCount = unloadedRecords.length;
 
@@ -68039,7 +68642,7 @@ define("ember-data/lib/system/store",
             this.recordArrayManager.registerWaitingRecordArray(record, manyArray);
           }, this);
 
-          resolver.resolve(this.fetchMany(unloadedRecords, owner));
+          resolver.resolve(this.scheduleFetchMany(unloadedRecords, owner));
         } else {
           if (resolver) { resolver.resolve(); }
           manyArray.set('isLoaded', true);
@@ -68112,9 +68715,8 @@ define("ember-data/lib/system/store",
         @param {any} query an opaque query to be used by the adapter
         @return {Promise} promise
       */
-      findQuery: function(type, query) {
-        type = this.modelFor(type);
-
+      findQuery: function(typeName, query) {
+        var type = this.modelFor(typeName);
         var array = this.recordArrayManager
           .createAdapterPopulatedRecordArray(type, query);
 
@@ -68136,8 +68738,8 @@ define("ember-data/lib/system/store",
         @param {String or subclass of DS.Model} type
         @return {DS.AdapterPopulatedRecordArray}
       */
-      findAll: function(type) {
-        type = this.modelFor(type);
+      findAll: function(typeName) {
+        var type = this.modelFor(typeName);
 
         return this.fetchAll(type, this.all(type));
       },
@@ -68150,8 +68752,8 @@ define("ember-data/lib/system/store",
         @return {Promise} promise
       */
       fetchAll: function(type, array) {
-        var adapter = this.adapterFor(type),
-            sinceToken = this.typeMapFor(type).metadata.since;
+        var adapter = this.adapterFor(type);
+        var sinceToken = this.typeMapFor(type).metadata.since;
 
         set(array, 'isUpdating', true);
 
@@ -68190,11 +68792,10 @@ define("ember-data/lib/system/store",
         @param {String or subclass of DS.Model} type
         @return {DS.RecordArray}
       */
-      all: function(type) {
-        type = this.modelFor(type);
-
-        var typeMap = this.typeMapFor(type),
-            findAllCache = typeMap.findAllCache;
+      all: function(typeName) {
+        var type = this.modelFor(typeName);
+        var typeMap = this.typeMapFor(type);
+        var findAllCache = typeMap.findAllCache;
 
         if (findAllCache) { return findAllCache; }
 
@@ -68388,9 +68989,9 @@ define("ember-data/lib/system/store",
         this._pendingSave = [];
 
         forEach(pending, function(tuple) {
-          var record = tuple[0], resolver = tuple[1],
-              adapter = this.adapterFor(record.constructor),
-              operation;
+          var record = tuple[0], resolver = tuple[1];
+          var adapter = this.adapterFor(record.constructor);
+          var operation;
 
           if (get(record, 'currentState.stateName') === 'root.deleted.saved') {
             return resolver.resolve(record);
@@ -68468,8 +69069,8 @@ define("ember-data/lib/system/store",
         @param {Object} data
       */
       updateId: function(record, data) {
-        var oldId = get(record, 'id'),
-            id = coerceId(data.id);
+        var oldId = get(record, 'id');
+        var id = coerceId(data.id);
 
         Ember.assert("An adapter cannot assign a new id to a record that already has an id. " + record + " had id: " + oldId + " and you tried to update it with " + id + ". This likely happened because your server returned data in response to a find or update that had a different id than the one you sent.", oldId === null || id === oldId);
 
@@ -68487,18 +69088,18 @@ define("ember-data/lib/system/store",
         @return {Object} typeMap
       */
       typeMapFor: function(type) {
-        var typeMaps = get(this, 'typeMaps'),
-            guid = Ember.guidFor(type),
-            typeMap;
+        var typeMaps = get(this, 'typeMaps');
+        var guid = Ember.guidFor(type);
+        var typeMap;
 
         typeMap = typeMaps[guid];
 
         if (typeMap) { return typeMap; }
 
         typeMap = {
-          idToRecord: {},
+          idToRecord: Object.create(null),
           records: [],
-          metadata: {},
+          metadata: Object.create(null),
           type: type
         };
 
@@ -68522,8 +69123,8 @@ define("ember-data/lib/system/store",
           the existing data, not replace it.
       */
       _load: function(type, data, partial) {
-        var id = coerceId(data.id),
-            record = this.recordForId(type, id);
+        var id = coerceId(data.id);
+        var record = this.recordForId(type, id);
 
         record.setupData(data, partial);
         this.recordArrayManager.recordDidChange(record);
@@ -68542,7 +69143,6 @@ define("ember-data/lib/system/store",
       */
       modelFor: function(key) {
         var factory;
-
 
         if (typeof key === 'string') {
           var normalizedKey = this.container.normalize('model:' + key);
@@ -68623,14 +69223,14 @@ define("ember-data/lib/system/store",
         @return {DS.Model} the record that was created or
           updated.
       */
-      push: function(type, data, _partial) {
+      push: function(typeName, data, _partial) {
         // _partial is an internal param used by `update`.
         // If passed, it means that the data should be
         // merged into the existing data, not replace it.
 
-        Ember.assert("You must include an `id` for " + type + " in a hash passed to `push`", data.id != null);
+        Ember.assert("You must include an `id` for " + typeName+ " in a hash passed to `push`", data.id != null);
 
-        type = this.modelFor(type);
+        var type = this.modelFor(typeName);
 
         // normalize relationship IDs into records
         data = normalizeRelationships(this, type, data);
@@ -68667,7 +69267,7 @@ define("ember-data/lib/system/store",
         By default, the data will be deserialized using a default
         serializer (the application serializer if it exists).
 
-        Alternativly, `pushPayload` will accept a model type which
+        Alternatively, `pushPayload` will accept a model type which
         will determine which serializer will process the payload.
         However, the serializer itself (processing this data via
         `normalizePayload`) will not know which model it is
@@ -68684,16 +69284,43 @@ define("ember-data/lib/system/store",
         @param {String} type Optionally, a model used to determine which serializer will be used
         @param {Object} payload
       */
-      pushPayload: function (type, payload) {
+      pushPayload: function (type, inputPayload) {
         var serializer;
-        if (!payload) {
+        var payload;
+        if (!inputPayload) {
           payload = type;
           serializer = defaultSerializer(this.container);
           Ember.assert("You cannot use `store#pushPayload` without a type unless your default serializer defines `pushPayload`", serializer.pushPayload);
         } else {
+          payload = inputPayload;
           serializer = this.serializerFor(type);
         }
         serializer.pushPayload(this, payload);
+      },
+
+      /**
+        `normalize` converts a json payload into the normalized form that
+        [push](#method_push) expects.
+
+        Example
+
+        ```js
+        socket.on('message', function(message) {
+          var modelName = message.model;
+          var data = message.data;
+          store.push(modelName, store.normalize(modelName, data));
+        });
+        ```
+
+        @method normalize
+        @param {String} The name of the model type for this payload
+        @param {Object} payload
+        @return {Object} The normalized payload
+      */
+      normalize: function (type, payload) {
+        var serializer = this.serializerFor(type);
+        var model = this.modelFor(type);
+        return serializer.normalize(model, payload);
       },
 
       /**
@@ -68702,7 +69329,7 @@ define("ember-data/lib/system/store",
         properties. This makes it safe to use with a subset of record
         attributes. This method expects normalized data.
 
-        `update` is useful if you app broadcasts partial updates to
+        `update` is useful if your app broadcasts partial updates to
         records.
 
         ```js
@@ -68758,8 +69385,8 @@ define("ember-data/lib/system/store",
         @param {String or subclass of DS.Model} type
         @param {Object} metadata
       */
-      metaForType: function(type, metadata) {
-        type = this.modelFor(type);
+      metaForType: function(typeName, metadata) {
+        var type = this.modelFor(typeName);
 
         Ember.merge(this.typeMapFor(type).metadata, metadata);
       },
@@ -68776,8 +69403,8 @@ define("ember-data/lib/system/store",
         @return {DS.Model} record
       */
       buildRecord: function(type, id, data) {
-        var typeMap = this.typeMapFor(type),
-            idToRecord = typeMap.idToRecord;
+        var typeMap = this.typeMapFor(type);
+        var idToRecord = typeMap.idToRecord;
 
         Ember.assert('The id ' + id + ' has already been used with another record of type ' + type.toString() + '.', !id || !idToRecord[id]);
         Ember.assert("`" + Ember.inspect(type)+ "` does not appear to be an ember-data model", (typeof type._create === 'function') );
@@ -68818,9 +69445,9 @@ define("ember-data/lib/system/store",
         @param {DS.Model} record
       */
       dematerializeRecord: function(record) {
-        var type = record.constructor,
-            typeMap = this.typeMapFor(type),
-            id = get(record, 'id');
+        var type = record.constructor;
+        var typeMap = this.typeMapFor(type);
+        var id = get(record, 'id');
 
         record.updateRecordArrays();
 
@@ -68837,10 +69464,11 @@ define("ember-data/lib/system/store",
       // ........................
 
       addRelationshipChangeFor: function(childRecord, childKey, parentRecord, parentKey, change) {
-        var clientId = childRecord.clientId,
-            parentClientId = parentRecord ? parentRecord : parentRecord;
+        var clientId = childRecord.clientId;
+        var parentClientId = parentRecord ? parentRecord : parentRecord;
         var key = childKey + parentKey;
         var changes = this._relationshipChanges;
+
         if (!(clientId in changes)) {
           changes[clientId] = {};
         }
@@ -68854,10 +69482,11 @@ define("ember-data/lib/system/store",
       },
 
       removeRelationshipChangeFor: function(clientRecord, childKey, parentRecord, parentKey, type) {
-        var clientId = clientRecord.clientId,
-            parentClientId = parentRecord ? parentRecord.clientId : parentRecord;
+        var clientId = clientRecord.clientId;
+        var parentClientId = parentRecord ? parentRecord.clientId : parentRecord;
         var changes = this._relationshipChanges;
         var key = childKey + parentKey;
+
         if (!(clientId in changes) || !(parentClientId in changes[clientId]) || !(key in changes[clientId][parentClientId])){
           return;
         }
@@ -68872,9 +69501,9 @@ define("ember-data/lib/system/store",
         //TODO(Igor) What about the other side
         var changesObject = this._relationshipChanges[record.clientId];
         for (var objKey in changesObject){
-          if(changesObject.hasOwnProperty(objKey)){
+          if (changesObject.hasOwnProperty(objKey)){
             for (var changeKey in changesObject[objKey]){
-              if(changesObject[objKey].hasOwnProperty(changeKey)){
+              if (changesObject[objKey].hasOwnProperty(changeKey)){
                 toReturn.push(changesObject[objKey][changeKey]);
               }
             }
@@ -68973,10 +69602,15 @@ define("ember-data/lib/system/store",
           return;
         }
 
-        var kind = relationship.kind,
-            value = data[key];
+        var kind = relationship.kind;
+        var value = data[key];
 
-        if (value == null) { return; }
+        if (value == null) {
+          if (kind === 'hasMany' && record) {
+            value = data[key] = record.get(key).toArray();
+          }
+          return;
+        }
 
         if (kind === 'belongsTo') {
           deserializeRecordId(store, data, key, relationship, value);
@@ -68990,7 +69624,7 @@ define("ember-data/lib/system/store",
     }
 
     function deserializeRecordId(store, data, key, relationship, id) {
-      if (!Model) { Model = requireModule("ember-data/lib/system/model")["Model"]; }
+      if (!Model) { Model = requireModule("ember-data/system/model")["Model"]; }
       if (isNone(id) || id instanceof Model) {
         return;
       }
@@ -69024,8 +69658,16 @@ define("ember-data/lib/system/store",
     // in the payload, so add them back in manually.
     function addUnsavedRecords(record, key, data) {
       if(record) {
-        Ember.A(data).pushObjects(record.get(key).filterBy('isNew'));
+        var unsavedRecords = uniqById(Ember.A(data), record.get(key).filterBy('isNew'));
+        Ember.A(data).pushObjects(unsavedRecords);
       }
+    }
+
+    function uniqById(data, records) {
+      var currentIds = data.mapBy("id");
+      return records.reject(function(record) {
+        return Ember.A(currentIds).contains(record.id);
+      });
     }
 
     // Delegation to the adapter and promise management
@@ -69061,7 +69703,7 @@ define("ember-data/lib/system/store",
     PromiseArray = Ember.ArrayProxy.extend(Ember.PromiseProxyMixin);
     /**
       A `PromiseObject` is an object that acts like both an `Ember.Object`
-      and a promise. When the promise is resolved the the resulting value
+      and a promise. When the promise is resolved, then the resulting value
       will be set to the `PromiseObject`'s `content` property. This makes
       it easy to create data bindings with the `PromiseObject` that will
       be updated when the promise resolves.
@@ -69119,9 +69761,9 @@ define("ember-data/lib/system/store",
     }
 
     function serializerForAdapter(adapter, type) {
-      var serializer = adapter.serializer,
-          defaultSerializer = adapter.defaultSerializer,
-          container = adapter.container;
+      var serializer = adapter.serializer;
+      var defaultSerializer = adapter.defaultSerializer;
+      var container = adapter.container;
 
       if (container && serializer === undefined) {
         serializer = serializerFor(container, type.typeKey, defaultSerializer);
@@ -69136,43 +69778,84 @@ define("ember-data/lib/system/store",
       return serializer;
     }
 
-    function _find(adapter, store, type, id) {
-      var promise = adapter.find(store, type, id),
-          serializer = serializerForAdapter(adapter, type),
-          label = "DS: Handle Adapter#find of " + type + " with id: " + id;
+    function _objectIsAlive(object) {
+      return !(get(object, "isDestroyed") || get(object, "isDestroying"));
+    }
 
-      return Promise.cast(promise, label).then(function(adapterPayload) {
+    function _guard(promise, test) {
+      var guarded = promise['finally'](function() {
+        if (!test()) {
+          guarded._subscribers.length = 0;
+        }
+      });
+
+      return guarded;
+    }
+
+    function _bind(fn) {
+      var args = Array.prototype.slice.call(arguments, 1);
+
+      return function() {
+        return fn.apply(undefined, args);
+      };
+    }
+
+    function _find(adapter, store, type, id, record) {
+      var promise = adapter.find(store, type, id, record);
+      var serializer = serializerForAdapter(adapter, type);
+      var label = "DS: Handle Adapter#find of " + type + " with id: " + id;
+
+      promise = Promise.cast(promise, label);
+      promise = _guard(promise, _bind(_objectIsAlive, store));
+
+      return promise.then(function(adapterPayload) {
         Ember.assert("You made a request for a " + type.typeKey + " with id " + id + ", but the adapter's response did not have any data", adapterPayload);
         var payload = serializer.extract(store, type, adapterPayload, id, 'find');
 
         return store.push(type, payload);
       }, function(error) {
         var record = store.getById(type, id);
-        record.notFound();
+        if (record) {
+          record.notFound();
+        }
         throw error;
       }, "DS: Extract payload of '" + type + "'");
     }
 
-    function _findMany(adapter, store, type, ids, owner) {
-      var promise = adapter.findMany(store, type, ids, owner),
-          serializer = serializerForAdapter(adapter, type),
-          label = "DS: Handle Adapter#findMany of " + type;
 
-      return Promise.cast(promise, label).then(function(adapterPayload) {
+    function _findMany(adapter, store, type, ids, records) {
+      var promise = adapter.findMany(store, type, ids, records);
+      var serializer = serializerForAdapter(adapter, type);
+      var label = "DS: Handle Adapter#findMany of " + type;
+
+      if (promise === undefined) {
+        throw new Error('adapter.findMany returned undefined, this was very likely a mistake');
+      }
+
+      var guardedPromise;
+
+      promise = Promise.cast(promise, label);
+      promise = _guard(promise, _bind(_objectIsAlive, store));
+
+      return promise.then(function(adapterPayload) {
         var payload = serializer.extract(store, type, adapterPayload, null, 'findMany');
 
         Ember.assert("The response from a findMany must be an Array, not " + Ember.inspect(payload), Ember.typeOf(payload) === 'array');
 
-        store.pushMany(type, payload);
+        return store.pushMany(type, payload);
       }, null, "DS: Extract payload of " + type);
     }
 
     function _findHasMany(adapter, store, record, link, relationship) {
-      var promise = adapter.findHasMany(store, record, link, relationship),
-          serializer = serializerForAdapter(adapter, relationship.type),
-          label = "DS: Handle Adapter#findHasMany of " + record + " : " + relationship.type;
+      var promise = adapter.findHasMany(store, record, link, relationship);
+      var serializer = serializerForAdapter(adapter, relationship.type);
+      var label = "DS: Handle Adapter#findHasMany of " + record + " : " + relationship.type;
 
-      return Promise.cast(promise, label).then(function(adapterPayload) {
+      promise = Promise.cast(promise, label);
+      promise = _guard(promise, _bind(_objectIsAlive, store));
+      promise = _guard(promise, _bind(_objectIsAlive, record));
+
+      return promise.then(function(adapterPayload) {
         var payload = serializer.extract(store, relationship.type, adapterPayload, null, 'findHasMany');
 
         Ember.assert("The response from a findHasMany must be an Array, not " + Ember.inspect(payload), Ember.typeOf(payload) === 'array');
@@ -69183,11 +69866,15 @@ define("ember-data/lib/system/store",
     }
 
     function _findBelongsTo(adapter, store, record, link, relationship) {
-      var promise = adapter.findBelongsTo(store, record, link, relationship),
-          serializer = serializerForAdapter(adapter, relationship.type),
-          label = "DS: Handle Adapter#findBelongsTo of " + record + " : " + relationship.type;
+      var promise = adapter.findBelongsTo(store, record, link, relationship);
+      var serializer = serializerForAdapter(adapter, relationship.type);
+      var label = "DS: Handle Adapter#findBelongsTo of " + record + " : " + relationship.type;
 
-      return Promise.cast(promise, label).then(function(adapterPayload) {
+      promise = Promise.cast(promise, label);
+      promise = _guard(promise, _bind(_objectIsAlive, store));
+      promise = _guard(promise, _bind(_objectIsAlive, record));
+
+      return promise.then(function(adapterPayload) {
         var payload = serializer.extract(store, relationship.type, adapterPayload, null, 'findBelongsTo');
         var record = store.push(relationship.type, payload);
 
@@ -69197,11 +69884,14 @@ define("ember-data/lib/system/store",
     }
 
     function _findAll(adapter, store, type, sinceToken) {
-      var promise = adapter.findAll(store, type, sinceToken),
-          serializer = serializerForAdapter(adapter, type),
-          label = "DS: Handle Adapter#findAll of " + type;
+      var promise = adapter.findAll(store, type, sinceToken);
+      var serializer = serializerForAdapter(adapter, type);
+      var label = "DS: Handle Adapter#findAll of " + type;
 
-      return Promise.cast(promise, label).then(function(adapterPayload) {
+      promise = Promise.cast(promise, label);
+      promise = _guard(promise, _bind(_objectIsAlive, store));
+
+      return promise.then(function(adapterPayload) {
         var payload = serializer.extract(store, type, adapterPayload, null, 'findAll');
 
         Ember.assert("The response from a findAll must be an Array, not " + Ember.inspect(payload), Ember.typeOf(payload) === 'array');
@@ -69213,11 +69903,14 @@ define("ember-data/lib/system/store",
     }
 
     function _findQuery(adapter, store, type, query, recordArray) {
-      var promise = adapter.findQuery(store, type, query, recordArray),
-          serializer = serializerForAdapter(adapter, type),
-          label = "DS: Handle Adapter#findQuery of " + type;
+      var promise = adapter.findQuery(store, type, query, recordArray);
+      var serializer = serializerForAdapter(adapter, type);
+      var label = "DS: Handle Adapter#findQuery of " + type;
 
-      return Promise.cast(promise, label).then(function(adapterPayload) {
+      promise = Promise.cast(promise, label);
+      promise = _guard(promise, _bind(_objectIsAlive, store));
+
+      return promise.then(function(adapterPayload) {
         var payload = serializer.extract(store, type, adapterPayload, null, 'findQuery');
 
         Ember.assert("The response from a findQuery must be an Array, not " + Ember.inspect(payload), Ember.typeOf(payload) === 'array');
@@ -69228,12 +69921,16 @@ define("ember-data/lib/system/store",
     }
 
     function _commit(adapter, store, operation, record) {
-      var type = record.constructor,
-          promise = adapter[operation](store, type, record),
-          serializer = serializerForAdapter(adapter, type),
-          label = "DS: Extract and notify about " + operation + " completion of " + record;
+      var type = record.constructor;
+      var promise = adapter[operation](store, type, record);
+      var serializer = serializerForAdapter(adapter, type);
+      var label = "DS: Extract and notify about " + operation + " completion of " + record;
 
-      Ember.assert("Your adapter's '" + operation + "' method must return a promise, but it returned " + promise, isThenable(promise));
+      Ember.assert("Your adapter's '" + operation + "' method must return a value, but it returned `undefined", promise !==undefined);
+
+      promise = Promise.cast(promise, label);
+      promise = _guard(promise, _bind(_objectIsAlive, store));
+      promise = _guard(promise, _bind(_objectIsAlive, record));
 
       return promise.then(function(adapterPayload) {
         var payload;
@@ -69260,10 +69957,11 @@ define("ember-data/lib/system/store",
     __exports__.Store = Store;
     __exports__.PromiseArray = PromiseArray;
     __exports__.PromiseObject = PromiseObject;
+
     __exports__["default"] = Store;
   });
-define("ember-data/lib/transforms", 
-  ["./transforms/base","./transforms/number","./transforms/date","./transforms/string","./transforms/boolean","exports"],
+define("ember-data/transforms",
+  ["ember-data/transforms/base","ember-data/transforms/number","ember-data/transforms/date","ember-data/transforms/string","ember-data/transforms/boolean","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
     "use strict";
     var Transform = __dependency1__["default"];
@@ -69278,7 +69976,7 @@ define("ember-data/lib/transforms",
     __exports__.StringTransform = StringTransform;
     __exports__.BooleanTransform = BooleanTransform;
   });
-define("ember-data/lib/transforms/base", 
+define("ember-data/transforms/base",
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -69309,14 +70007,14 @@ define("ember-data/lib/transforms/base",
       var attr = DS.attr;
       App.Requirement = DS.Model.extend({
         name: attr('string'),
-        optionsArray: attr('raw')
+        temperature: attr('temperature')
       });
       ```
 
       @class Transform
       @namespace DS
      */
-    var Transform = Ember.Object.extend({
+    __exports__["default"] = Ember.Object.extend({
       /**
         When given a deserialized value from a record attribute this
         method must return the serialized value.
@@ -69352,13 +70050,10 @@ define("ember-data/lib/transforms/base",
         @return The deserialized value
       */
       deserialize: Ember.required()
-
     });
-
-    __exports__["default"] = Transform;
   });
-define("ember-data/lib/transforms/boolean", 
-  ["./base","exports"],
+define("ember-data/transforms/boolean",
+  ["ember-data/transforms/base","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var Transform = __dependency1__["default"];
@@ -69384,7 +70079,7 @@ define("ember-data/lib/transforms/boolean",
       @extends DS.Transform
       @namespace DS
      */
-    var BooleanTransform = Transform.extend({
+    __exports__["default"] = Transform.extend({
       deserialize: function(serialized) {
         var type = typeof serialized;
 
@@ -69403,10 +70098,9 @@ define("ember-data/lib/transforms/boolean",
         return Boolean(deserialized);
       }
     });
-    __exports__["default"] = BooleanTransform;
   });
-define("ember-data/lib/transforms/date", 
-  ["./base","exports"],
+define("ember-data/transforms/date",
+  ["ember-data/transforms/base","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     /**
@@ -69429,7 +70123,34 @@ define("ember-data/lib/transforms/date",
       @namespace DS
      */
     var Transform = __dependency1__["default"];
-    var DateTransform = Transform.extend({
+
+    // Date.prototype.toISOString shim
+    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toISOString
+    var toISOString = Date.prototype.toISOString || function() {
+      function pad(number) {
+        if ( number < 10 ) {
+          return '0' + number;
+        }
+        return number;
+      }
+
+      return this.getUTCFullYear() +
+        '-' + pad( this.getUTCMonth() + 1 ) +
+        '-' + pad( this.getUTCDate() ) +
+        'T' + pad( this.getUTCHours() ) +
+        ':' + pad( this.getUTCMinutes() ) +
+        ':' + pad( this.getUTCSeconds() ) +
+        '.' + (this.getUTCMilliseconds() / 1000).toFixed(3).slice(2, 5) +
+        'Z';
+    };
+
+    if (Ember.SHIM_ES5) {
+      if (!Date.prototype.toISOString) {
+        Date.prototype.toISOString = toISOString;
+      }
+    }
+
+    __exports__["default"] = Transform.extend({
 
       deserialize: function(serialized) {
         var type = typeof serialized;
@@ -69449,39 +70170,15 @@ define("ember-data/lib/transforms/date",
 
       serialize: function(date) {
         if (date instanceof Date) {
-          var days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-          var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-          var pad = function(num) {
-            return num < 10 ? "0"+num : ""+num;
-          };
-
-          var utcYear = date.getUTCFullYear(),
-              utcMonth = date.getUTCMonth(),
-              utcDayOfMonth = date.getUTCDate(),
-              utcDay = date.getUTCDay(),
-              utcHours = date.getUTCHours(),
-              utcMinutes = date.getUTCMinutes(),
-              utcSeconds = date.getUTCSeconds();
-
-
-          var dayOfWeek = days[utcDay];
-          var dayOfMonth = pad(utcDayOfMonth);
-          var month = months[utcMonth];
-
-          return dayOfWeek + ", " + dayOfMonth + " " + month + " " + utcYear + " " +
-                 pad(utcHours) + ":" + pad(utcMinutes) + ":" + pad(utcSeconds) + " GMT";
+          return toISOString.call(date);
         } else {
           return null;
         }
-      } 
-
+      }
     });
-
-    __exports__["default"] = DateTransform;
   });
-define("ember-data/lib/transforms/number", 
-  ["./base","exports"],
+define("ember-data/transforms/number",
+  ["ember-data/transforms/base","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var Transform = __dependency1__["default"];
@@ -69509,8 +70206,7 @@ define("ember-data/lib/transforms/number",
       @extends DS.Transform
       @namespace DS
      */
-    var NumberTransform = Transform.extend({
-
+    __exports__["default"] = Transform.extend({
       deserialize: function(serialized) {
         return empty(serialized) ? null : Number(serialized);
       },
@@ -69519,11 +70215,9 @@ define("ember-data/lib/transforms/number",
         return empty(deserialized) ? null : Number(deserialized);
       }
     });
-
-    __exports__["default"] = NumberTransform;
   });
-define("ember-data/lib/transforms/string", 
-  ["./base","exports"],
+define("ember-data/transforms/string",
+  ["ember-data/transforms/base","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var Transform = __dependency1__["default"];
@@ -69550,21 +70244,37 @@ define("ember-data/lib/transforms/string",
       @extends DS.Transform
       @namespace DS
      */
-    var StringTransform = Transform.extend({
-
+    __exports__["default"] = Transform.extend({
       deserialize: function(serialized) {
         return none(serialized) ? null : String(serialized);
       },
-
       serialize: function(deserialized) {
         return none(deserialized) ? null : String(deserialized);
       }
-
     });
-
-    __exports__["default"] = StringTransform;
   });
-define("ember-inflector/lib/ext/string", 
+define("ember-inflector",
+  ["./system","./helpers","./ext/string","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
+    "use strict";
+    var Inflector = __dependency1__.Inflector;
+    var defaultRules = __dependency1__.defaultRules;
+    var pluralize = __dependency1__.pluralize;
+    var singularize = __dependency1__.singularize;
+
+    Inflector.defaultRules = defaultRules;
+    Ember.Inflector        = Inflector;
+
+    Ember.String.pluralize   = pluralize;
+    Ember.String.singularize = singularize;
+
+
+    __exports__["default"] = Inflector;
+
+    __exports__.pluralize = pluralize;
+    __exports__.singularize = singularize;
+  });
+define("ember-inflector/ext/string",
   ["../system/string"],
   function(__dependency1__) {
     "use strict";
@@ -69593,28 +70303,46 @@ define("ember-inflector/lib/ext/string",
       };
     }
   });
-define("ember-inflector/lib/main", 
-  ["./system","./ext/string","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
+define("ember-inflector/helpers",
+  ["./system/string"],
+  function(__dependency1__) {
     "use strict";
-    var Inflector = __dependency1__.Inflector;
-    var defaultRules = __dependency1__.defaultRules;
-    var pluralize = __dependency1__.pluralize;
     var singularize = __dependency1__.singularize;
+    var pluralize = __dependency1__.pluralize;
 
-    Inflector.defaultRules = defaultRules;
-    Ember.Inflector        = Inflector;
+    /**
+     *
+     * If you have Ember Inflector (such as if Ember Data is present),
+     * singularize a word. For example, turn "oxen" into "ox".
+     *
+     * Example:
+     *
+     * {{singularize myProperty}}
+     * {{singularize "oxen"}}
+     *
+     * @for Ember.Handlebars.helpers
+     * @method singularize
+     * @param {String|Property} word word to singularize
+    */
+    Ember.Handlebars.helper('singularize', singularize);
 
-    Ember.String.pluralize   = pluralize;
-    Ember.String.singularize = singularize;
-
-
-    __exports__["default"] = Inflector;
-
-    __exports__.pluralize = pluralize;
-    __exports__.singularize = singularize;
+    /**
+     *
+     * If you have Ember Inflector (such as if Ember Data is present),
+     * pluralize a word. For example, turn "ox" into "oxen".
+     *
+     * Example:
+     *
+     * {{pluralize myProperty}}
+     * {{pluralize "oxen"}}
+     *
+     * @for Ember.Handlebars.helpers
+     * @method pluralize
+     * @param {String|Property} word word to pluralize
+    */
+    Ember.Handlebars.helper('pluralize', pluralize);
   });
-define("ember-inflector/lib/system", 
+define("ember-inflector/system",
   ["./system/inflector","./system/string","./system/inflections","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
     "use strict";
@@ -69633,11 +70361,11 @@ define("ember-inflector/lib/system",
     __exports__.pluralize = pluralize;
     __exports__.defaultRules = defaultRules;
   });
-define("ember-inflector/lib/system/inflections", 
+define("ember-inflector/system/inflections",
   ["exports"],
   function(__exports__) {
     "use strict";
-    var defaultRules = {
+    __exports__["default"] = {
       plurals: [
         [/$/, 's'],
         [/s$/i, 's'],
@@ -69715,14 +70443,15 @@ define("ember-inflector/lib/system/inflections",
         'police'
       ]
     };
-
-    __exports__["default"] = defaultRules;
   });
-define("ember-inflector/lib/system/inflector", 
+define("ember-inflector/system/inflector",
   ["exports"],
   function(__exports__) {
     "use strict";
     var BLANK_REGEX = /^\s*$/;
+    var LAST_WORD_DASHED_REGEX = /(\w+[_-])([a-z\d]+$)/;
+    var LAST_WORD_CAMELIZED_REGEX = /(\w+)([A-Z][a-z\d]*$)/;
+    var CAMELIZED_REGEX = /[A-Z][a-z\d]*$/;
 
     function loadUncountable(rules, uncountable) {
       for (var i = 0, length = uncountable.length; i < length; i++) {
@@ -69736,8 +70465,13 @@ define("ember-inflector/lib/system/inflector",
       for (var i = 0, length = irregularPairs.length; i < length; i++) {
         pair = irregularPairs[i];
 
+        //pluralizing
         rules.irregular[pair[0].toLowerCase()] = pair[1];
+        rules.irregular[pair[1].toLowerCase()] = pair[1];
+
+        //singularizing
         rules.irregularInverse[pair[1].toLowerCase()] = pair[0];
+        rules.irregularInverse[pair[0].toLowerCase()] = pair[0];
       }
     }
 
@@ -69801,28 +70535,93 @@ define("ember-inflector/lib/system/inflector",
     */
     function Inflector(ruleSet) {
       ruleSet = ruleSet || {};
-      ruleSet.uncountable = ruleSet.uncountable || {};
-      ruleSet.irregularPairs = ruleSet.irregularPairs || {};
+      ruleSet.uncountable = ruleSet.uncountable || makeDictionary();
+      ruleSet.irregularPairs = ruleSet.irregularPairs || makeDictionary();
 
       var rules = this.rules = {
         plurals:  ruleSet.plurals || [],
         singular: ruleSet.singular || [],
-        irregular: {},
-        irregularInverse: {},
-        uncountable: {}
+        irregular: makeDictionary(),
+        irregularInverse: makeDictionary(),
+        uncountable: makeDictionary()
       };
 
       loadUncountable(rules, ruleSet.uncountable);
       loadIrregular(rules, ruleSet.irregularPairs);
+
+      this.enableCache();
+    }
+
+    if (!Object.create && !Object.create(null).hasOwnProperty) {
+      throw new Error("This browser does not support Object.create(null), please polyfil with es5-sham: http://git.io/yBU2rg");
+    }
+
+    function makeDictionary() {
+      var cache = Object.create(null);
+      cache['_dict'] = null;
+      delete cache['_dict'];
+      return cache;
     }
 
     Inflector.prototype = {
+      /**
+        @public
+
+        As inflections can be costly, and commonly the same subset of words are repeatedly
+        inflected an optional cache is provided.
+
+        @method enableCache
+      */
+      enableCache: function() {
+        this.purgeCache();
+
+        this.singularize = function(word) {
+          this._cacheUsed = true;
+          return this._sCache[word] || (this._sCache[word] = this._singularize(word));
+        };
+
+        this.pluralize = function(word) {
+          this._cacheUsed = true;
+          return this._pCache[word] || (this._pCache[word] = this._pluralize(word));
+        };
+      },
+
+      /**
+        @public
+
+        @method purgedCache
+      */
+      purgeCache: function() {
+        this._cacheUsed = false;
+        this._sCache = makeDictionary();
+        this._pCache = makeDictionary();
+      },
+
+      /**
+        @public
+        disable caching
+
+        @method disableCache;
+      */
+      disableCache: function() {
+        this._sCache = null;
+        this._pCache = null;
+        this.singularize = function(word) {
+          return this._singularize(word);
+        };
+
+        this.pluralize = function(word) {
+          return this._pluralize(word);
+        };
+      },
+
       /**
         @method plural
         @param {RegExp} regex
         @param {String} string
       */
       plural: function(regex, string) {
+        if (this._cacheUsed) { this.purgeCache(); }
         this.rules.plurals.push([regex, string.toLowerCase()]);
       },
 
@@ -69832,6 +70631,7 @@ define("ember-inflector/lib/system/inflector",
         @param {String} string
       */
       singular: function(regex, string) {
+        if (this._cacheUsed) { this.purgeCache(); }
         this.rules.singular.push([regex, string.toLowerCase()]);
       },
 
@@ -69840,6 +70640,7 @@ define("ember-inflector/lib/system/inflector",
         @param {String} regex
       */
       uncountable: function(string) {
+        if (this._cacheUsed) { this.purgeCache(); }
         loadUncountable(this.rules, [string.toLowerCase()]);
       },
 
@@ -69849,6 +70650,7 @@ define("ember-inflector/lib/system/inflector",
         @param {String} plural
       */
       irregular: function (singular, plural) {
+        if (this._cacheUsed) { this.purgeCache(); }
         loadIrregular(this.rules, [[singular, plural]]);
       },
 
@@ -69857,14 +70659,21 @@ define("ember-inflector/lib/system/inflector",
         @param {String} word
       */
       pluralize: function(word) {
-        return this.inflect(word, this.rules.plurals, this.rules.irregular);
+        return this._pluralize(word);
       },
 
+      _pluralize: function(word) {
+        return this.inflect(word, this.rules.plurals, this.rules.irregular);
+      },
       /**
         @method singularize
         @param {String} word
       */
       singularize: function(word) {
+        return this._singularize(word);
+      },
+
+      _singularize: function(word) {
         return this.inflect(word, this.rules.singular,  this.rules.irregularInverse);
       },
 
@@ -69877,27 +70686,41 @@ define("ember-inflector/lib/system/inflector",
         @param {Object} irregular
       */
       inflect: function(word, typeRules, irregular) {
-        var inflection, substitution, result, lowercase, isBlank,
-        isUncountable, isIrregular, isIrregularInverse, rule;
-
+        var inflection, substitution, result, lowercase, wordSplit,
+          firstPhrase, lastWord, isBlank, isCamelized, isUncountable, 
+          isIrregular, isIrregularInverse, rule;
+      
         isBlank = BLANK_REGEX.test(word);
+        isCamelized = CAMELIZED_REGEX.test(word);
+        firstPhrase = "";
 
         if (isBlank) {
           return word;
         }
 
         lowercase = word.toLowerCase();
+        wordSplit = LAST_WORD_DASHED_REGEX.exec(word) || LAST_WORD_CAMELIZED_REGEX.exec(word);
+        if (wordSplit){
+          firstPhrase = wordSplit[1];
+          lastWord = wordSplit[2].toLowerCase();
+        }
 
-        isUncountable = this.rules.uncountable[lowercase];
+        isUncountable = this.rules.uncountable[lowercase] || this.rules.uncountable[lastWord];
 
         if (isUncountable) {
           return word;
         }
 
-        isIrregular = irregular && irregular[lowercase];
+        isIrregular = irregular && (irregular[lowercase] || irregular[lastWord]);
 
         if (isIrregular) {
-          return isIrregular;
+          if (irregular[lowercase]){
+            return isIrregular;
+          }
+          else {
+            isIrregular = (isCamelized) ? isIrregular.capitalize() : isIrregular;
+            return firstPhrase + isIrregular;
+          }
         }
 
         for (var i = typeRules.length, min = 0; i > min; i--) {
@@ -69922,24 +70745,25 @@ define("ember-inflector/lib/system/inflector",
 
     __exports__["default"] = Inflector;
   });
-define("ember-inflector/lib/system/string", 
+define("ember-inflector/system/string",
   ["./inflector","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var Inflector = __dependency1__["default"];
-    var pluralize = function(word) {
-      return Inflector.inflector.pluralize(word);
-    };
 
-    var singularize = function(word) {
+    function pluralize(word) {
+      return Inflector.inflector.pluralize(word);
+    }
+
+    function singularize(word) {
       return Inflector.inflector.singularize(word);
-    };
+    }
 
     __exports__.pluralize = pluralize;
     __exports__.singularize = singularize;
   });
-global.DS = requireModule('ember-data/lib/main')['default'];
-}(Ember.lookup));
+ global.DS = requireModule('ember-data')['default'];
+ })(this);
 ;define("ic-ajax",
   ["ember","exports"],
   function(__dependency1__, __exports__) {
@@ -70068,5542 +70892,6 @@ global.DS = requireModule('ember-data/lib/main')['default'];
       };
     }
   });
-;/***************
-    Details
-***************/
-
-/*!
-* Velocity.js: Accelerated JavaScript animation.
-* @version 0.9.0
-* @docs http://velocityjs.org
-* @license Copyright 2014 Julian Shapiro. MIT License: http://en.wikipedia.org/wiki/MIT_License
-*/
-
-/****************
-     Summary
-****************/
-
-/*
-Velocity's structure:
-- CSS Stack: Works independently from the rest of Velocity.
-- Velocity.animate(): Core method that iterates over the targeted elements and queues the incoming call onto each element individually. Consists of:
-  - Pre-Queueing: Prepare the element for animation by instantiating its data cache and processing the call's options.
-  - Queueing: The logic that runs once the call has reached its point of execution in the element's $.queue() stack.
-              Most logic is placed here to avoid risking it becoming stale (if the element's properties have changed).
-  - Pushing: Consolidation of the tween data followed by its push onto the global in-progress calls container.
-- tick(): The single requestAnimationFrame loop responsible for tweening all in-progress calls.
-- completeCall(): Handles the cleanup process for each Velocity call.
-*/
-
-/* NOTICE: Despite the ensuing code indicating that Velocity works *without* jQuery and *with* Zepto, this support has not yet landed. */
-
-/******************
-    Velocity.js
-******************/
-
-;(function (global, window, document, undefined) {
-
-    /*****************
-        Constants
-    *****************/
-
-    var NAME = "velocity",
-        DEFAULT_DURATION = 400,
-        DEFAULT_EASING = "swing";
-
-    /*********************
-       Helper Functions
-    *********************/
-
-    /* IE detection. Gist: https://gist.github.com/julianshapiro/9098609 */
-    var IE = (function() {
-        if (document.documentMode) {
-            return document.documentMode;
-        } else {
-            for (var i = 7; i > 4; i--) {
-                var div = document.createElement("div");
-
-                div.innerHTML = "<!--[if IE " + i + "]><span></span><![endif]-->";
-
-                if (div.getElementsByTagName("span").length) {
-                    div = null;
-
-                    return i;
-                }
-            }
-        }
-
-        return undefined;
-    })();
-
-    /* rAF polyfill. Gist: https://gist.github.com/julianshapiro/9497513 */
-    var rAFPollyfill = (function() {
-        var timeLast = 0;
-
-        return window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame || function(callback) {
-            var timeCurrent = (new Date()).getTime(),
-                timeDelta;
-
-            /* Dynamically set delay on a per-tick basis to match 60fps. */
-            /* Technique by Erik Moller. MIT license: https://gist.github.com/paulirish/1579671 */
-            timeDelta = Math.max(0, 16 - (timeCurrent - timeLast));
-            timeLast = timeCurrent + timeDelta;
-
-            return setTimeout(function() { callback(timeCurrent + timeDelta); }, timeDelta);
-        };
-    })();
-
-    var rAF = window.requestAnimationFrame || rAFPollyfill;
-
-    /* Array compacting. Copyright Lo-Dash. MIT License: https://github.com/lodash/lodash/blob/master/LICENSE.txt */
-    function compactSparseArray (array) {
-        var index = -1,
-            length = array ? array.length : 0,
-            result = [];
-
-        while (++index < length) {
-            var value = array[index];
-
-            if (value) {
-                result.push(value);
-            }
-        }
-
-        return result;
-    }
-
-    var Type = {
-        isString: function (variable) {
-            return (typeof variable === "string");
-        },
-
-        isArray: Array.isArray || function (variable) {
-            return Object.prototype.toString.call(variable) === "[object Array]";
-        },
-
-        isFunction: function (variable) {
-            return Object.prototype.toString.call(variable) === "[object Function]";
-        },
-
-        isNode: function (variable) {
-            return variable && variable.nodeType;
-        },
-
-        /* Copyright Martin Bohm. MIT License: https://gist.github.com/Tomalak/818a78a226a0738eaade */
-        isNodeList: function (variable) {
-            return typeof variable === "object" &&
-                /^\[object (HTMLCollection|NodeList|Object)\]$/.test(Object.prototype.toString.call(variable)) &&
-                variable.length !== undefined &&
-                (variable.length === 0 || (typeof variable[0] === "object" && variable[0].nodeType > 0));
-        },
-
-        /* Determine if variable is a wrapped jQuery or Zepto element. */
-        isWrapped: function (variable) {
-            return variable && (variable.jquery || (window.Zepto && window.Zepto.zepto.isZ(variable)));
-        },
-
-        isSVG: function (variable) {
-            return window.SVGElement && (variable instanceof SVGElement);
-        }
-    };
-
-    /*****************
-       Dependencies
-    *****************/
-
-    /* Local to our Velocity scope, assign $ to our jQuery shim if jQuery itself isn't loaded.
-       (The shim is a port of the jQuery utility functions that Velocity uses.) */
-    /* Note: We can't default to Zepto since the shimless version of Velocity does not work with Zepto,
-       which is missing several utility functions that Velocity requires. */
-    var $ = window.jQuery || (global.Velocity && global.Velocity.Utilities);
-
-    if (!$) {
-        throw new Error("Velocity: Either jQuery or Velocity's jQuery shim must first be loaded.")
-    /* We allow the global Velocity variable to pre-exist so long as we were responsible for its creation
-      (via the jQuery shim, which uniquely assigns a Utilities property to the Velocity object). */
-    } else if (global.Velocity !== undefined && !global.Velocity.Utilities) {
-        throw new Error("Velocity: Namespace is occupied.");
-    /* Nothing prevents Velocity from working on IE6+7, but it is not worth the time to test on them.
-       Revert to jQuery's $.animate(), and lose Velocity's extra features. */
-    } else if (IE <= 7) {
-        if (!window.jQuery) {
-            throw new Error("Velocity: For IE<=7, Velocity falls back to jQuery, which must first be loaded.");
-        } else {
-            window.jQuery.fn.velocity = window.jQuery.fn.animate;
-
-            /* Now that $.fn.velocity is aliased, abort this Velocity declaration. */
-            return;
-        }
-    /* IE8 doesn't work with the jQuery shim; it requires jQuery proper. */
-    } else if (IE === 8 && !window.jQuery) {
-        throw new Error("Velocity: For IE8, Velocity requires jQuery to be loaded. (Velocity's jQuery shim does not work with IE8.)");
-    }
-
-    /* Shorthand alias for jQuery's $.data() utility. */
-    function Data (element) {
-        /* Hardcode a reference to the plugin name. */
-        var response = $.data(element, NAME);
-
-        /* jQuery <=1.4.2 returns null instead of undefined when no match is found. We normalize this behavior. */
-        return response === null ? undefined : response;
-    };
-
-    /*************
-        State
-    *************/
-
-    /* Velocity registers itself onto a global container (window.jQuery || window.Zepto || window) so that that
-       certain features are accessible beyond just a per-element scope. This master object contains an .animate() method,
-       which is later assigned to $.fn (if jQuery or Zepto are present). Accordingly, Velocity can both act on wrapped
-       DOM elements and stand alone for targeting raw DOM elements. */
-    /* Note: The global object also doubles as a publicly-accessible data store for the purposes of unit testing. */
-    /* Note: Alias the lowercase and uppercase variants of "velocity" to minimize user confusion due to the lowercase nature of the $.fn extension. */
-    var Velocity = global.Velocity = global.velocity = {
-        /* Container for page-wide Velocity state data. */
-        State: {
-            /* Detect mobile devices to determine if mobileHA should be turned on. */
-            isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
-            /* The mobileHA option's behavior changes on older Android devices (Gingerbread, versions 2.3.3-2.3.7). */
-            isAndroid: /Android/i.test(navigator.userAgent),
-            isGingerbread: /Android 2\.3\.[3-7]/i.test(navigator.userAgent),
-            isChrome: window.chrome,
-            isFirefox: /Firefox/i.test(navigator.userAgent),
-            /* Create a cached element for re-use when checking for CSS property prefixes. */
-            prefixElement: document.createElement("div"),
-            /* Cache every prefix match to avoid repeating lookups. */
-            prefixMatches: {},
-            /* Cache the anchor used for animating window scrolling. */
-            scrollAnchor: null,
-            /* Cache the property names associated with the scroll anchor. */
-            scrollPropertyLeft: null,
-            scrollPropertyTop: null,
-            /* Keep track of whether our RAF tick is running. */
-            isTicking: false,
-            /* Container for every in-progress call to Velocity. */
-            calls: []
-        },
-        /* Velocity's custom CSS stack. Made global for unit testing. */
-        CSS: { /* Defined below. */ },
-        /* Defined by Velocity's optional jQuery shim. */
-        Utilities: window.jQuery,
-        /* Container for the user's custom animation sequences that are referenced by name in place of a properties map object. */
-        Sequences: {
-            /* Manually registered by the user. Learn more: VelocityJS.org/#sequences */
-        },
-        Easings: {
-            /* Defined below. */
-        },
-        /* Attempt to use ES6 Promises by default. Users can override this with a third-party promises library. */
-        Promise: window.Promise,
-        /* Page-wide option defaults, which can be overriden by the user. */
-        defaults: {
-            queue: "",
-            duration: DEFAULT_DURATION,
-            easing: DEFAULT_EASING,
-            begin: null,
-            complete: null,
-            progress: null,
-            display: null,
-            loop: false,
-            delay: false,
-            mobileHA: true,
-            /* Set to false to prevent property values from being cached between consecutive Velocity-initiated chain calls. */
-            _cacheValues: true
-        },
-        /* Velocity's core animation method, subsequently aliased to $.fn. */
-        animate: function () { /* Defined below. */ },
-        /* Set to true to force a duration of 1ms for all animations so that UI testing can be performed without waiting on animations to complete. */
-        mock: false,
-        version: { major: 0, minor: 9, patch: 0 },
-        /* Set to 1 or 2 (most verbose) to output debug info to console. */
-        debug: false
-    };
-
-    /* Retrieve the appropriate scroll anchor and property name for the browser: https://developer.mozilla.org/en-US/docs/Web/API/Window.scrollY */
-    if (window.pageYOffset !== undefined) {
-        Velocity.State.scrollAnchor = window;
-        Velocity.State.scrollPropertyLeft = "pageXOffset";
-        Velocity.State.scrollPropertyTop = "pageYOffset";
-    } else {
-        Velocity.State.scrollAnchor = document.documentElement || document.body.parentNode || document.body;
-        Velocity.State.scrollPropertyLeft = "scrollLeft";
-        Velocity.State.scrollPropertyTop = "scrollTop";
-    }
-
-    /**************
-        Timing
-    **************/
-
-    /* Inactive browser tabs pause rAF, which results in all active animations immediately sprinting to their completion states when the tab refocuses.
-       To get around this, we dynamically switch rAF to setTimeout (which the browser *doesn't* pause) when the tab loses focus. We skip this for mobile
-       devices to avoid wasting battery power on inactive tabs. */
-    /* Note: Tab focus detection doesn't work on older versions of IE, but that's okay since they don't support rAF to begin with. */
-    if (!Velocity.State.isMobile && document.hidden !== undefined) {
-        document.addEventListener("visibilitychange", function() {
-            /* Reassign the rAF function (which the global tick() function uses) based on the tab's focus state. */
-            if (document.hidden) {
-                rAF = function(callback) { 
-                    /* The tick function needs a truthy first argument to pass its internal timestamp check. */
-                    return setTimeout(function() { callback(true) }, 16);
-                };
-
-                /* The rAF loop has been paused by the browser, so we manually restart the tick. */
-                tick();
-            } else {
-                rAF = window.requestAnimationFrame || rAFPollyfill;
-            }
-        });
-    }
-
-    /**************
-        Easing
-    **************/
-
-    /* Step easing generator. */
-    function generateStep (steps) {
-        return function (p) {
-            return Math.round(p * steps) * (1 / steps);
-        };
-    }
-
-    /* Bezier curve function generator. Copyright Gaetan Renaudeau. MIT License: http://en.wikipedia.org/wiki/MIT_License */
-    var generateBezier = (function () {
-        function A (aA1, aA2) {
-            return 1.0 - 3.0 * aA2 + 3.0 * aA1;
-        }
-
-        function B (aA1, aA2) {
-            return 3.0 * aA2 - 6.0 * aA1;
-        }
-        function C (aA1) {
-            return 3.0 * aA1;
-        }
-
-        function calcBezier (aT, aA1, aA2) {
-            return ((A(aA1, aA2)*aT + B(aA1, aA2))*aT + C(aA1))*aT;
-        }
-
-        function getSlope (aT, aA1, aA2) {
-            return 3.0 * A(aA1, aA2)*aT*aT + 2.0 * B(aA1, aA2) * aT + C(aA1);
-        }
-
-        return function (mX1, mY1, mX2, mY2) {
-            /* Must contain four arguments. */
-            if (arguments.length !== 4) {
-                return false;
-            }
-
-            /* Arguments must be numbers. */
-            for (var i = 0; i < 4; ++i) {
-                if (typeof arguments[i] !== "number" || isNaN(arguments[i]) || !isFinite(arguments[i])) {
-                    return false;
-                }
-            }
-
-            /* X values must be in the [0, 1] range. */
-            mX1 = Math.min(mX1, 1);
-            mX2 = Math.min(mX2, 1);
-            mX1 = Math.max(mX1, 0);
-            mX2 = Math.max(mX2, 0);
-
-            function getTForX (aX) {
-                var aGuessT = aX;
-
-                for (var i = 0; i < 8; ++i) {
-                    var currentSlope = getSlope(aGuessT, mX1, mX2);
-
-                    if (currentSlope === 0.0) {
-                        return aGuessT;
-                    }
-
-                    var currentX = calcBezier(aGuessT, mX1, mX2) - aX;
-
-                    aGuessT -= currentX / currentSlope;
-                }
-
-                return aGuessT;
-            }
-
-            return function (aX) {
-                if (mX1 === mY1 && mX2 === mY2) {
-                    return aX;
-                } else {
-                    return calcBezier(getTForX(aX), mY1, mY2);
-                }
-            };
-        };
-    }());
-
-    /* Runge-Kutta spring physics function generator. Adapted from Framer.js, copyright Koen Bok. MIT License: http://en.wikipedia.org/wiki/MIT_License */
-    /* Given a tension, friction, and duration, a simulation at 60FPS will first run without a defined duration in order to calculate the full path. A second pass
-       then adjusts the time dela -- using the relation between actual time and duration -- to calculate the path for the duration-constrained animation. */
-    var generateSpringRK4 = (function () {
-
-        function springAccelerationForState (state) {
-            return (-state.tension * state.x) - (state.friction * state.v);
-        }
-
-        function springEvaluateStateWithDerivative (initialState, dt, derivative) {
-            var state = {
-                x: initialState.x + derivative.dx * dt,
-                v: initialState.v + derivative.dv * dt,
-                tension: initialState.tension,
-                friction: initialState.friction
-            };
-
-            return { dx: state.v, dv: springAccelerationForState(state) };
-        }
-
-        function springIntegrateState (state, dt) {
-            var a = {
-                    dx: state.v,
-                    dv: springAccelerationForState(state)
-                },
-                b = springEvaluateStateWithDerivative(state, dt * 0.5, a),
-                c = springEvaluateStateWithDerivative(state, dt * 0.5, b),
-                d = springEvaluateStateWithDerivative(state, dt, c),
-                dxdt = 1.0 / 6.0 * (a.dx + 2.0 * (b.dx + c.dx) + d.dx),
-                dvdt = 1.0 / 6.0 * (a.dv + 2.0 * (b.dv + c.dv) + d.dv);
-
-            state.x = state.x + dxdt * dt;
-            state.v = state.v + dvdt * dt;
-
-            return state;
-        }
-
-        return function springRK4Factory (tension, friction, duration) {
-
-            var initState = {
-                    x: -1,
-                    v: 0,
-                    tension: null,
-                    friction: null
-                },
-                path = [0],
-                time_lapsed = 0,
-                tolerance = 1 / 10000,
-                DT = 16 / 1000,
-                have_duration, dt, last_state;
-
-            tension = parseFloat(tension) || 500;
-            friction = parseFloat(friction) || 20;
-            duration = duration || null;
-
-            initState.tension = tension;
-            initState.friction = friction;
-
-            have_duration = duration !== null;
-
-            /* Calculate the actual time it takes for this animation to complete with the provided conditions. */
-            if (have_duration) {
-                /* Run the simulation without a duration. */
-                time_lapsed = springRK4Factory(tension, friction);
-                /* Compute the adjusted time delta. */
-                dt = time_lapsed / duration * DT;
-            } else {
-                dt = DT;
-            }
-
-            while (true) {
-                /* Next/step function .*/
-                last_state = springIntegrateState(last_state || initState, dt);
-                /* Store the position. */
-                path.push(1 + last_state.x);
-                time_lapsed += 16;
-                /* If the change threshold is reached, break. */
-                if (!(Math.abs(last_state.x) > tolerance && Math.abs(last_state.v) > tolerance)) {
-                    break;
-                }
-            }
-
-            /* If duration is not defined, return the actual time required for completing this animation. Otherwise, return a closure that holds the
-               computed path and returns a snapshot of the position according to a given percentComplete. */
-            return !have_duration ? time_lapsed : function(percentComplete) { return path[ (percentComplete * (path.length - 1)) | 0 ]; };
-        };
-    }());
-
-    /* Velocity embeds the named easings from jQuery, jQuery UI, and CSS3 in order to save users from having to include additional libraries on their page. */
-    (function () {
-        /* jQuery's default named easing types. */
-        Velocity.Easings["linear"] = function(p) {
-            return p;
-        };
-
-        Velocity.Easings["swing"] = function(p) {
-            return 0.5 - Math.cos(p * Math.PI) / 2;
-        };
-
-        /* Bonus "spring" easing, which is a less exaggerated version of easeInOutElastic. */
-        Velocity.Easings["spring"] = function(p) {
-            return 1 - (Math.cos(p * 4.5 * Math.PI) * Math.exp(-p * 6));
-        };
-
-        /* CSS3's named easing types. */
-        Velocity.Easings["ease"] = generateBezier(0.25, 0.1, 0.25, 1.0);
-        Velocity.Easings["ease-in"] = generateBezier(0.42, 0.0, 1.00, 1.0);
-        Velocity.Easings["ease-out"] = generateBezier(0.00, 0.0, 0.58, 1.0);
-        Velocity.Easings["ease-in-out"] = generateBezier(0.42, 0.0, 0.58, 1.0);
-
-        /* jQuery UI's Robert Penner easing equations. Copyright The jQuery Foundation. MIT License: https://jquery.org/license */
-        var baseEasings = {};
-
-        $.each(["Quad", "Cubic", "Quart", "Quint", "Expo"], function(i, name) {
-            baseEasings[name] = function(p) {
-                return Math.pow(p, i + 2);
-            };
-        });
-
-        $.extend(baseEasings, {
-            Sine: function (p) {
-                return 1 - Math.cos(p * Math.PI / 2);
-            },
-
-            Circ: function (p) {
-                return 1 - Math.sqrt(1 - p * p);
-            },
-
-            Elastic: function(p) {
-                return p === 0 || p === 1 ? p :
-                    -Math.pow(2, 8 * (p - 1)) * Math.sin(((p - 1) * 80 - 7.5) * Math.PI / 15);
-            },
-
-            Back: function(p) {
-                return p * p * (3 * p - 2);
-            },
-
-            Bounce: function (p) {
-                var pow2,
-                    bounce = 4;
-
-                while (p < ((pow2 = Math.pow(2, --bounce)) - 1) / 11) {}
-                return 1 / Math.pow(4, 3 - bounce) - 7.5625 * Math.pow((pow2 * 3 - 2) / 22 - p, 2);
-            }
-        });
-
-        /* jQuery's easing generator for the object above. */
-        $.each(baseEasings, function(name, easeIn) {
-            Velocity.Easings["easeIn" + name] = easeIn;
-            Velocity.Easings["easeOut" + name] = function(p) {
-                return 1 - easeIn(1 - p);
-            };
-            Velocity.Easings["easeInOut" + name] = function(p) {
-                return p < 0.5 ?
-                    easeIn(p * 2) / 2 :
-                    1 - easeIn(p * -2 + 2) / 2;
-            };
-        });
-    })();
-
-    /* Determine the appropriate easing type given an easing input. */
-    function getEasing(value, duration) {
-        var easing = value;
-
-        /* The easing option can either be a string that references a pre-registered easing,
-           or it can be a two-/four-item array of integers to be converted into a bezier/spring function. */
-        if (Type.isString(value)) {
-            /* Ensure that the easing has been assigned to jQuery's Velocity.Easings object. */
-            if (!Velocity.Easings[value]) {
-                easing = false;
-            }
-        } else if (Type.isArray(value) && value.length === 1) {
-            easing = generateStep.apply(null, value);
-        } else if (Type.isArray(value) && value.length === 2) {
-            /* springRK4 must be passed the animation's duration. */
-            /* Note: If the springRK4 array contains non-numbers, generateSpringRK4() returns an easing
-               function generated with default tension and friction values. */
-            easing = generateSpringRK4.apply(null, value.concat([ duration ]));
-        } else if (Type.isArray(value) && value.length === 4) {
-            /* Note: If the bezier array contains non-numbers, generateBezier() returns false. */
-            easing = generateBezier.apply(null, value);
-        } else {
-            easing = false;
-        }
-
-        /* Revert to the Velocity-wide default easing type, or fall back to "swing" (which is also jQuery's default)
-           if the Velocity-wide default has been incorrectly modified. */
-        if (easing === false) {
-            if (Velocity.Easings[Velocity.defaults.easing]) {
-                easing = Velocity.defaults.easing;
-            } else {
-                easing = DEFAULT_EASING;
-            }
-        }
-
-        return easing;
-    }
-
-    /*****************
-        CSS Stack
-    *****************/
-
-    /* The CSS object is a highly condensed and performant CSS stack that fully replaces jQuery's.
-       It handles the validation, getting, and setting of both standard CSS properties and CSS property hooks. */
-    /* Note: A "CSS" shorthand is aliased so that our code is easier to read. */
-    var CSS = Velocity.CSS = {
-
-        /*************
-            RegEx
-        *************/
-
-        RegEx: {
-            /* Unwrap a property value's surrounding text, e.g. "rgba(4, 3, 2, 1)" ==> "4, 3, 2, 1" and "rect(4px 3px 2px 1px)" ==> "4px 3px 2px 1px". */
-            isHex: /^#([A-f\d]{3}){1,2}$/i,
-            valueUnwrap: /^[A-z]+\((.*)\)$/i,
-            wrappedValueAlreadyExtracted: /[0-9.]+ [0-9.]+ [0-9.]+( [0-9.]+)?/,
-            /* Split a multi-value property into an array of subvalues, e.g. "rgba(4, 3, 2, 1) 4px 3px 2px 1px" ==> [ "rgba(4, 3, 2, 1)", "4px", "3px", "2px", "1px" ]. */
-            valueSplit: /([A-z]+\(.+\))|(([A-z0-9#-.]+?)(?=\s|$))/ig
-        },
-
-        /************
-            Lists
-        ************/
-
-        Lists: {
-            colors: [ "fill", "stroke", "stopColor", "color", "backgroundColor", "borderColor", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor", "outlineColor" ],
-            transformsBase: [ "translateX", "translateY", "scale", "scaleX", "scaleY", "skewX", "skewY", "rotateZ" ],
-            transforms3D: [ "transformPerspective", "translateZ", "scaleZ", "rotateX", "rotateY" ]
-        },
-
-        /************
-            Hooks
-        ************/
-
-        /* Hooks allow a subproperty (e.g. "boxShadowBlur") of a compound-value CSS property
-           (e.g. "boxShadow: X Y Blur Spread Color") to be animated as if it were a discrete property. */
-        /* Note: Beyond enabling fine-grained property animation, hooking is necessary since Velocity only
-           tweens properties with single numeric values; unlike CSS transitions, Velocity does not interpolate compound-values. */
-        Hooks: {
-            /********************
-                Registration
-            ********************/
-
-            /* Templates are a concise way of indicating which subproperties must be individually registered for each compound-value CSS property. */
-            /* Each template consists of the compound-value's base name, its constituent subproperty names, and those subproperties' default values. */
-            templates: {
-                "textShadow": [ "Color X Y Blur", "black 0px 0px 0px" ],
-                /* Todo: Add support for inset boxShadows. (webkit places it last whereas IE places it first.) */
-                "boxShadow": [ "Color X Y Blur Spread", "black 0px 0px 0px 0px" ],
-                "clip": [ "Top Right Bottom Left", "0px 0px 0px 0px" ],
-                "backgroundPosition": [ "X Y", "0% 0%" ],
-                "transformOrigin": [ "X Y Z", "50% 50% 0px" ],
-                "perspectiveOrigin": [ "X Y", "50% 50%" ]
-            },
-
-            /* A "registered" hook is one that has been converted from its template form into a live,
-               tweenable property. It contains data to associate it with its root property. */
-            registered: {
-                /* Note: A registered hook looks like this ==> textShadowBlur: [ "textShadow", 3 ],
-                   which consists of the subproperty's name, the associated root property's name,
-                   and the subproperty's position in the root's value. */
-            },
-            /* Convert the templates into individual hooks then append them to the registered object above. */
-            register: function () {
-                /* Color hooks registration. */
-                /* Note: Colors are defaulted to white -- as opposed to black -- since colors that are
-                   currently set to "transparent" default to their respective template below when color-animated,
-                   and white is typically a closer match to transparent than black is. */
-                for (var i = 0; i < CSS.Lists.colors.length; i++) {
-                    CSS.Hooks.templates[CSS.Lists.colors[i]] = [ "Red Green Blue Alpha", "255 255 255 1" ];
-                }
-
-                var rootProperty,
-                    hookTemplate,
-                    hookNames;
-
-                /* In IE, color values inside compound-value properties are positioned at the end the value instead of at the beginning.
-                   Thus, we re-arrange the templates accordingly. */
-                if (IE) {
-                    for (rootProperty in CSS.Hooks.templates) {
-                        hookTemplate = CSS.Hooks.templates[rootProperty];
-                        hookNames = hookTemplate[0].split(" ");
-
-                        var defaultValues = hookTemplate[1].match(CSS.RegEx.valueSplit);
-
-                        if (hookNames[0] === "Color") {
-                            /* Reposition both the hook's name and its default value to the end of their respective strings. */
-                            hookNames.push(hookNames.shift());
-                            defaultValues.push(defaultValues.shift());
-
-                            /* Replace the existing template for the hook's root property. */
-                            CSS.Hooks.templates[rootProperty] = [ hookNames.join(" "), defaultValues.join(" ") ];
-                        }
-                    }
-                }
-
-                /* Hook registration. */
-                for (rootProperty in CSS.Hooks.templates) {
-                    hookTemplate = CSS.Hooks.templates[rootProperty];
-                    hookNames = hookTemplate[0].split(" ");
-
-                    for (var i in hookNames) {
-                        var fullHookName = rootProperty + hookNames[i],
-                            hookPosition = i;
-
-                        /* For each hook, register its full name (e.g. textShadowBlur) with its root property (e.g. textShadow)
-                           and the hook's position in its template's default value string. */
-                        CSS.Hooks.registered[fullHookName] = [ rootProperty, hookPosition ];
-                    }
-                }
-            },
-
-            /*****************************
-               Injection and Extraction
-            *****************************/
-
-            /* Look up the root property associated with the hook (e.g. return "textShadow" for "textShadowBlur"). */
-            /* Since a hook cannot be set directly (the browser won't recognize it), style updating for hooks is routed through the hook's root property. */
-            getRoot: function (property) {
-                var hookData = CSS.Hooks.registered[property];
-
-                if (hookData) {
-                    return hookData[0];
-                } else {
-                    /* If there was no hook match, return the property name untouched. */
-                    return property;
-                }
-            },
-            /* Convert any rootPropertyValue, null or otherwise, into a space-delimited list of hook values so that
-               the targeted hook can be injected or extracted at its standard position. */
-            cleanRootPropertyValue: function(rootProperty, rootPropertyValue) {
-                /* If the rootPropertyValue is wrapped with "rgb()", "clip()", etc., remove the wrapping to normalize the value before manipulation. */
-                if (CSS.RegEx.valueUnwrap.test(rootPropertyValue)) {
-                    rootPropertyValue = rootPropertyValue.match(CSS.Hooks.RegEx.valueUnwrap)[1];
-                }
-
-                /* If rootPropertyValue is a CSS null-value (from which there's inherently no hook value to extract),
-                   default to the root's default value as defined in CSS.Hooks.templates. */
-                /* Note: CSS null-values include "none", "auto", and "transparent". They must be converted into their
-                   zero-values (e.g. textShadow: "none" ==> textShadow: "0px 0px 0px black") for hook manipulation to proceed. */
-                if (CSS.Values.isCSSNullValue(rootPropertyValue)) {
-                    rootPropertyValue = CSS.Hooks.templates[rootProperty][1];
-                }
-
-                return rootPropertyValue;
-            },
-            /* Extracted the hook's value from its root property's value. This is used to get the starting value of an animating hook. */
-            extractValue: function (fullHookName, rootPropertyValue) {
-                var hookData = CSS.Hooks.registered[fullHookName];
-
-                if (hookData) {
-                    var hookRoot = hookData[0],
-                        hookPosition = hookData[1];
-
-                    rootPropertyValue = CSS.Hooks.cleanRootPropertyValue(hookRoot, rootPropertyValue);
-
-                    /* Split rootPropertyValue into its constituent hook values then grab the desired hook at its standard position. */
-                    return rootPropertyValue.toString().match(CSS.RegEx.valueSplit)[hookPosition];
-                } else {
-                    /* If the provided fullHookName isn't a registered hook, return the rootPropertyValue that was passed in. */
-                    return rootPropertyValue;
-                }
-            },
-            /* Inject the hook's value into its root property's value. This is used to piece back together the root property
-               once Velocity has updated one of its individually hooked values through tweening. */
-            injectValue: function (fullHookName, hookValue, rootPropertyValue) {
-                var hookData = CSS.Hooks.registered[fullHookName];
-
-                if (hookData) {
-                    var hookRoot = hookData[0],
-                        hookPosition = hookData[1],
-                        rootPropertyValueParts,
-                        rootPropertyValueUpdated;
-
-                    rootPropertyValue = CSS.Hooks.cleanRootPropertyValue(hookRoot, rootPropertyValue);
-
-                    /* Split rootPropertyValue into its individual hook values, replace the targeted value with hookValue,
-                       then reconstruct the rootPropertyValue string. */
-                    rootPropertyValueParts = rootPropertyValue.toString().match(CSS.RegEx.valueSplit);
-                    rootPropertyValueParts[hookPosition] = hookValue;
-                    rootPropertyValueUpdated = rootPropertyValueParts.join(" ");
-
-                    return rootPropertyValueUpdated;
-                } else {
-                    /* If the provided fullHookName isn't a registered hook, return the rootPropertyValue that was passed in. */
-                    return rootPropertyValue;
-                }
-            }
-        },
-
-        /*******************
-           Normalizations
-        *******************/
-
-        /* Normalizations standardize CSS property manipulation by pollyfilling browser-specific implementations (e.g. opacity)
-           and reformatting special properties (e.g. clip, rgba) to look like standard ones. */
-        Normalizations: {
-            /* Normalizations are passed a normalization target (either the property's name, its extracted value, or its injected value),
-               the targeted element (which may need to be queried), and the targeted property value. */
-            registered: {
-                clip: function(type, element, propertyValue) {
-                    switch (type) {
-                        case "name":
-                            return "clip";
-                        /* Clip needs to be unwrapped and stripped of its commas during extraction. */
-                        case "extract":
-                            var extracted;
-
-                            /* If Velocity also extracted this value, skip extraction. */
-                            if (CSS.RegEx.wrappedValueAlreadyExtracted.test(propertyValue)) {
-                                extracted = propertyValue;
-                            } else {
-                                /* Remove the "rect()" wrapper. */
-                                extracted = propertyValue.toString().match(CSS.RegEx.valueUnwrap);
-
-                                /* Strip off commas. */
-                                extracted = extracted ? extracted[1].replace(/,(\s+)?/g, " ") : propertyValue;
-                            }
-
-                            return extracted;
-                        /* Clip needs to be re-wrapped during injection. */
-                        case "inject":
-                            return "rect(" + propertyValue + ")";
-                    }
-                },
-
-                /* <=IE8 do not support the standard opacity property. They use filter:alpha(opacity=INT) instead. */
-                opacity: function (type, element, propertyValue) {
-                    if (IE <= 8) {
-                        switch (type) {
-                            case "name":
-                                return "filter";
-                            case "extract":
-                                /* <=IE8 return a "filter" value of "alpha(opacity=\d{1,3})".
-                                   Extract the value and convert it to a decimal value to match the standard CSS opacity property's formatting. */
-                                var extracted = propertyValue.toString().match(/alpha\(opacity=(.*)\)/i);
-
-                                if (extracted) {
-                                    /* Convert to decimal value. */
-                                    propertyValue = extracted[1] / 100;
-                                } else {
-                                    /* When extracting opacity, default to 1 since a null value means opacity hasn't been set. */
-                                    propertyValue = 1;
-                                }
-
-                                return propertyValue;
-                            case "inject":
-                                /* Opacified elements are required to have their zoom property set to a non-zero value. */
-                                element.style.zoom = 1;
-
-                                /* Setting the filter property on elements with certain font property combinations can result in a
-                                   highly unappealing ultra-bolding effect. There's no way to remedy this throughout a tween, but dropping the
-                                   value altogether (when opacity hits 1) at leasts ensures that the glitch is gone post-tweening. */
-                                if (parseFloat(propertyValue) >= 1) {
-                                    return "";
-                                } else {
-                                  /* As per the filter property's spec, convert the decimal value to a whole number and wrap the value. */
-                                  return "alpha(opacity=" + parseInt(parseFloat(propertyValue) * 100, 10) + ")";
-                                }
-                        }
-                    /* With all other browsers, normalization is not required; return the same values that were passed in. */
-                    } else {
-                        switch (type) {
-                            case "name":
-                                return "opacity";
-                            case "extract":
-                                return propertyValue;
-                            case "inject":
-                                return propertyValue;
-                        }
-                    }
-                }
-            },
-
-            /*****************************
-                Batched Registrations
-            *****************************/
-
-            /* Note: Batched normalizations extend the CSS.Normalizations.registered object. */
-            register: function () {
-
-                /*****************
-                    Transforms
-                *****************/
-
-                /* Transforms are the subproperties contained by the CSS "transform" property. Transforms must undergo normalization
-                   so that they can be referenced in a properties map by their individual names. */
-                /* Note: When transforms are "set", they are actually assigned to a per-element transformCache. When all transform
-                   setting is complete complete, CSS.flushTransformCache() must be manually called to flush the values to the DOM.
-                   Transform setting is batched in this way to improve performance: the transform style only needs to be updated
-                   once when multiple transform subproperties are being animated simultaneously. */
-                /* Note: IE9 and Android Gingerbread have support for 2D -- but not 3D -- transforms. Since animating unsupported
-                   transform properties results in the browser ignoring the *entire* transform string, we prevent these 3D values
-                   from being normalized for these browsers so that tweening skips these properties altogether
-                   (since it will ignore them as being unsupported by the browser.) */
-                if (!(IE <= 9) && !Velocity.State.isGingerbread) {
-                    /* Note: Since the standalone CSS "perspective" property and the CSS transform "perspective" subproperty
-                    share the same name, the latter is given a unique token within Velocity: "transformPerspective". */
-                    CSS.Lists.transformsBase = CSS.Lists.transformsBase.concat(CSS.Lists.transforms3D);
-                }
-
-                for (var i = 0; i < CSS.Lists.transformsBase.length; i++) {
-                    /* Wrap the dynamically generated normalization function in a new scope so that transformName's value is
-                    paired with its respective function. (Otherwise, all functions would take the final for loop's transformName.) */
-                    (function() {
-                        var transformName = CSS.Lists.transformsBase[i];
-
-                        CSS.Normalizations.registered[transformName] = function (type, element, propertyValue) {
-                            switch (type) {
-                                /* The normalized property name is the parent "transform" property -- the property that is actually set in CSS. */
-                                case "name":
-                                    return "transform";
-                                /* Transform values are cached onto a per-element transformCache object. */
-                                case "extract":
-                                    /* If this transform has yet to be assigned a value, return its null value. */
-                                    if (Data(element).transformCache[transformName] === undefined) {
-                                        /* Scale CSS.Lists.transformsBase default to 1 whereas all other transform properties default to 0. */
-                                        return /^scale/i.test(transformName) ? 1 : 0;
-                                    /* When transform values are set, they are wrapped in parentheses as per the CSS spec.
-                                       Thus, when extracting their values (for tween calculations), we strip off the parentheses. */
-                                    } else {
-                                        return Data(element).transformCache[transformName].replace(/[()]/g, "");
-                                    }
-                                case "inject":
-                                    var invalid = false;
-
-                                    /* If an individual transform property contains an unsupported unit type, the browser ignores the *entire* transform property.
-                                       Thus, protect users from themselves by skipping setting for transform values supplied with invalid unit types. */
-                                    /* Switch on the base transform type; ignore the axis by removing the last letter from the transform's name. */
-                                    switch (transformName.substr(0, transformName.length - 1)) {
-                                        /* Whitelist unit types for each transform. */
-                                        case "translate":
-                                            invalid = !/(%|px|em|rem|vw|vh|\d)$/i.test(propertyValue);
-                                            break;
-                                        /* Since an axis-free "scale" property is supported as well, a little hack is used here to detect it by chopping off its last letter. */
-                                        case "scal":
-                                        case "scale":
-                                            /* Chrome on Android has a bug in which scaled elements blur if their initial scale
-                                               value is below 1 (which can happen with forcefeeding). Thus, we detect a yet-unset scale property
-                                               and ensure that its first value is always 1. More info: http://stackoverflow.com/questions/10417890/css3-animations-with-transform-causes-blurred-elements-on-webkit/10417962#10417962 */
-                                            if (Velocity.State.isAndroid && Data(element).transformCache[transformName] === undefined && propertyValue < 1) {
-                                                propertyValue = 1;
-                                            }
-
-                                            invalid = !/(\d)$/i.test(propertyValue);
-                                            break;
-                                        case "skew":
-                                            invalid = !/(deg|\d)$/i.test(propertyValue);
-                                            break;
-                                        case "rotate":
-                                            invalid = !/(deg|\d)$/i.test(propertyValue);
-                                            break;
-                                    }
-
-                                    if (!invalid) {
-                                        /* As per the CSS spec, wrap the value in parentheses. */
-                                        Data(element).transformCache[transformName] = "(" + propertyValue + ")";
-                                    }
-
-                                    /* Although the value is set on the transformCache object, return the newly-updated value for the calling code to process as normal. */
-                                    return Data(element).transformCache[transformName];
-                            }
-                        };
-                    })();
-                }
-
-                /*************
-                    Colors
-                *************/
-
-                /* Since Velocity only animates a single numeric value per property, color animation is achieved by hooking the individual RGBA components of CSS color properties.
-                   Accordingly, color values must be normalized (e.g. "#ff0000", "red", and "rgb(255, 0, 0)" ==> "255 0 0 1") so that their components can be injected/extracted by CSS.Hooks logic. */
-                for (var i = 0; i < CSS.Lists.colors.length; i++) {
-                    /* Wrap the dynamically generated normalization function in a new scope so that colorName's value is paired with its respective function.
-                       (Otherwise, all functions would take the final for loop's colorName.) */
-                    (function () {
-                        var colorName = CSS.Lists.colors[i];
-
-                        /* Note: In IE<=8, which support rgb but not rgba, color properties are reverted to rgb by stripping off the alpha component. */
-                        CSS.Normalizations.registered[colorName] = function(type, element, propertyValue) {
-                            switch (type) {
-                                case "name":
-                                    return colorName;
-                                /* Convert all color values into the rgb format. (Old IE can return hex values and color names instead of rgb/rgba.) */
-                                case "extract":
-                                    var extracted;
-
-                                    /* If the color is already in its hookable form (e.g. "255 255 255 1") due to having been previously extracted, skip extraction. */
-                                    if (CSS.RegEx.wrappedValueAlreadyExtracted.test(propertyValue)) {
-                                        extracted = propertyValue;
-                                    } else {
-                                        var converted,
-                                            colorNames = {
-                                                black: "rgb(0, 0, 0)",
-                                                blue: "rgb(0, 0, 255)",
-                                                gray: "rgb(128, 128, 128)",
-                                                green: "rgb(0, 128, 0)",
-                                                red: "rgb(255, 0, 0)",
-                                                white: "rgb(255, 255, 255)"
-                                            };
-
-                                        /* Convert color names to rgb. */
-                                        if (/^[A-z]+$/i.test(propertyValue)) {
-                                            if (colorNames[propertyValue] !== undefined) {
-                                                converted = colorNames[propertyValue]
-                                            } else {
-                                                /* If an unmatched color name is provided, default to black. */
-                                                converted = colorNames.black;
-                                            }
-                                        /* Convert hex values to rgb. */
-                                        } else if (CSS.RegEx.isHex.test(propertyValue)) {
-                                            converted = "rgb(" + CSS.Values.hexToRgb(propertyValue).join(" ") + ")";
-                                        /* If the provided color doesn't match any of the accepted color formats, default to black. */
-                                        } else if (!(/^rgba?\(/i.test(propertyValue))) {
-                                            converted = colorNames.black;
-                                        }
-
-                                        /* Remove the surrounding "rgb/rgba()" string then replace commas with spaces and strip
-                                           repeated spaces (in case the value included spaces to begin with). */
-                                        extracted = (converted || propertyValue).toString().match(CSS.RegEx.valueUnwrap)[1].replace(/,(\s+)?/g, " ");
-                                    }
-
-                                    /* So long as this isn't <=IE8, add a fourth (alpha) component if it's missing and default it to 1 (visible). */
-                                    if (!(IE <= 8) && extracted.split(" ").length === 3) {
-                                        extracted += " 1";
-                                    }
-
-                                    return extracted;
-                                case "inject":
-                                    /* If this is IE<=8 and an alpha component exists, strip it off. */
-                                    if (IE <= 8) {
-                                        if (propertyValue.split(" ").length === 4) {
-                                            propertyValue = propertyValue.split(/\s+/).slice(0, 3).join(" ");
-                                        }
-                                    /* Otherwise, add a fourth (alpha) component if it's missing and default it to 1 (visible). */
-                                    } else if (propertyValue.split(" ").length === 3) {
-                                        propertyValue += " 1";
-                                    }
-
-                                    /* Re-insert the browser-appropriate wrapper("rgb/rgba()"), insert commas, and strip off decimal units
-                                       on all values but the fourth (R, G, and B only accept whole numbers). */
-                                    return (IE <= 8 ? "rgb" : "rgba") + "(" + propertyValue.replace(/\s+/g, ",").replace(/\.(\d)+(?=,)/g, "") + ")";
-                            }
-                        };
-                    })();
-                }
-            }
-        },
-
-        /************************
-           CSS Property Names
-        ************************/
-
-        Names: {
-            /* Camelcase a property name into its JavaScript notation (e.g. "background-color" ==> "backgroundColor").
-               Camelcasing is used to normalize property names between and across calls. */
-            camelCase: function (property) {
-                return property.replace(/-(\w)/g, function (match, subMatch) {
-                    return subMatch.toUpperCase();
-                });
-            },
-
-            /* For SVG elements, some properties (namely, dimensional ones) are GET/SET via the element's HTML attributes (instead of via CSS styles). */
-            SVGAttribute: function (property) {
-                var SVGAttributes = "width|height|x|y|cx|cy|r|rx|ry|x1|x2|y1|y2";
-
-                /* Certain browsers require an SVG transform to be applied as an attribute. (Otherwise, application via CSS is preferable due to 3D support.) */
-                if (IE || (Velocity.State.isAndroid && !Velocity.State.isChrome)) {
-                    SVGAttributes += "|transform";
-                }
-
-                return new RegExp("^(" + SVGAttributes + ")$", "i").test(property);
-            },
-
-            /* Determine whether a property should be set with a vendor prefix. */
-            /* If a prefixed version of the property exists, return it. Otherwise, return the original property name.
-               If the property is not at all supported by the browser, return a false flag. */
-            prefixCheck: function (property) {
-                /* If this property has already been checked, return the cached value. */
-                if (Velocity.State.prefixMatches[property]) {
-                    return [ Velocity.State.prefixMatches[property], true ];
-                } else {
-                    var vendors = [ "", "Webkit", "Moz", "ms", "O" ];
-
-                    for (var i = 0, vendorsLength = vendors.length; i < vendorsLength; i++) {
-                        var propertyPrefixed;
-
-                        if (i === 0) {
-                            propertyPrefixed = property;
-                        } else {
-                            /* Capitalize the first letter of the property to conform to JavaScript vendor prefix notation (e.g. webkitFilter). */
-                            propertyPrefixed = vendors[i] + property.replace(/^\w/, function(match) { return match.toUpperCase(); });
-                        }
-
-                        /* Check if the browser supports this property as prefixed. */
-                        if (Type.isString(Velocity.State.prefixElement.style[propertyPrefixed])) {
-                            /* Cache the match. */
-                            Velocity.State.prefixMatches[property] = propertyPrefixed;
-
-                            return [ propertyPrefixed, true ];
-                        }
-                    }
-
-                    /* If the browser doesn't support this property in any form, include a false flag so that the caller can decide how to proceed. */
-                    return [ property, false ];
-                }
-            }
-        },
-
-        /************************
-           CSS Property Values
-        ************************/
-
-        Values: {
-            /* Hex to RGB conversion. Copyright Tim Down: http://stackoverflow.com/questions/5623838/rgb-to-hex-and-hex-to-rgb */
-            hexToRgb: function (hex) {
-                var shortformRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i,
-                    longformRegex = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i,
-                    rgbParts;
-
-                hex = hex.replace(shortformRegex, function (m, r, g, b) {
-                    return r + r + g + g + b + b;
-                });
-
-                rgbParts = longformRegex.exec(hex);
-
-                return rgbParts ? [ parseInt(rgbParts[1], 16), parseInt(rgbParts[2], 16), parseInt(rgbParts[3], 16) ] : [ 0, 0, 0 ];
-            },
-            isCSSNullValue: function (value) {
-                /* The browser defaults CSS values that have not been set to either 0 or one of several possible null-value strings.
-                   Thus, we check for both falsiness and these special strings. */
-                /* Null-value checking is performed to default the special strings to 0 (for the sake of tweening) or their hook
-                   templates as defined as CSS.Hooks (for the sake of hook injection/extraction). */
-                /* Note: Chrome returns "rgba(0, 0, 0, 0)" for an undefined color whereas IE returns "transparent". */
-                return (value == 0 || /^(none|auto|transparent|(rgba\(0, ?0, ?0, ?0\)))$/i.test(value));
-            },
-            /* Retrieve a property's default unit type. Used for assigning a unit type when one is not supplied by the user. */
-            getUnitType: function (property) {
-                if (/^(rotate|skew)/i.test(property)) {
-                    return "deg";
-                } else if (/(^(scale|scaleX|scaleY|scaleZ|alpha|flexGrow|flexHeight|zIndex|fontWeight)$)|((opacity|red|green|blue|alpha)$)/i.test(property)) {
-                    /* The above properties are unitless. */
-                    return "";
-                } else {
-                    /* Default to px for all other properties. */
-                    return "px";
-                }
-            },
-            /* HTML elements default to an associated display type when they're not set to display:none. */
-            /* Note: This function is used for correctly setting the non-"none" display value in certain Velocity sequences, such as fadeIn/Out. */
-            getDisplayType: function (element) {
-                var tagName = element.tagName.toString().toLowerCase();
-
-                if (/^(b|big|i|small|tt|abbr|acronym|cite|code|dfn|em|kbd|strong|samp|var|a|bdo|br|img|map|object|q|script|span|sub|sup|button|input|label|select|textarea)$/i.test(tagName)) {
-                    return "inline";
-                } else if (/^(li)$/i.test(tagName)) {
-                    return "list-item";
-                } else if (/^(tr)$/i.test(tagName)) {
-                    return "table-row";
-                /* Default to "block" when no match is found. */
-                } else {
-                    return "block";
-                }
-            },
-            /* The class add/remove functions are used to temporarily apply a "velocity-animating" class to elements while they're animating. */
-            addClass: function (element, className) {
-                if (element.classList) {
-                    element.classList.add(className);
-                } else {
-                    element.className += (element.className.length ? " " : "") + className;
-                }
-            },
-            removeClass: function (element, className) {
-                if (element.classList) {
-                    element.classList.remove(className);
-                } else {
-                    element.className = element.className.toString().replace(new RegExp("(^|\\s)" + className.split(" ").join("|") + "(\\s|$)", "gi"), " ");
-                }
-            }
-        },
-
-        /****************************
-           Style Getting & Setting
-        ****************************/
-
-        /* The singular getPropertyValue, which routes the logic for all normalizations, hooks, and standard CSS properties. */
-        getPropertyValue: function (element, property, rootPropertyValue, forceStyleLookup) {
-            /* Get an element's computed property value. */
-            /* Note: Retrieving the value of a CSS property cannot simply be performed by checking an element's
-               style attribute (which only reflects user-defined values). Instead, the browser must be queried for a property's
-               *computed* value. You can read more about getComputedStyle here: https://developer.mozilla.org/en/docs/Web/API/window.getComputedStyle */
-            function computePropertyValue (element, property) {
-                /* When box-sizing isn't set to border-box, height and width style values are incorrectly computed when an
-                   element's scrollbars are visible (which expands the element's dimensions). Thus, we defer to the more accurate
-                   offsetHeight/Width property, which includes the total dimensions for interior, border, padding, and scrollbar.
-                   We subtract border and padding to get the sum of interior + scrollbar. */
-
-                var computedValue = 0;
-
-                /* IE<=8 doesn't support window.getComputedStyle, thus we defer to jQuery, which has an extensive array
-                   of hacks to accurately retrieve IE8 property values. Re-implementing that logic here is not worth bloating the
-                   codebase for a dying browser. The performance repercussions of using jQuery here are minimal since
-                   Velocity is optimized to rarely (and sometimes never) query the DOM. Further, the $.css() codepath isn't that slow. */
-                if (IE <= 8) {
-                    computedValue = $.css(element, property); /* GET */
-                /* All other browsers support getComputedStyle. The returned live object reference is cached onto its
-                   associated element so that it does not need to be refetched upon every GET. */
-                } else {
-                    /* Browsers do not return height and width values for elements that are set to display:"none". Thus, we temporarily
-                       toggle display to the element type's default value. */
-                    var toggleDisplay = false;
-
-                    if (/^(width|height)$/.test(property) && CSS.getPropertyValue(element, "display") === 0) {
-                        toggleDisplay = true;
-                        CSS.setPropertyValue(element, "display", CSS.Values.getDisplayType(element));
-                    }
-
-                    function revertDisplay () {
-                        if (toggleDisplay) {
-                            CSS.setPropertyValue(element, "display", "none");
-                        }
-                    }
-
-                    if (!forceStyleLookup) {
-                        if (property === "height" && CSS.getPropertyValue(element, "boxSizing").toString().toLowerCase() !== "border-box") {
-                            var contentBoxHeight = element.offsetHeight - (parseFloat(CSS.getPropertyValue(element, "borderTopWidth")) || 0) - (parseFloat(CSS.getPropertyValue(element, "borderBottomWidth")) || 0) - (parseFloat(CSS.getPropertyValue(element, "paddingTop")) || 0) - (parseFloat(CSS.getPropertyValue(element, "paddingBottom")) || 0);
-                            revertDisplay();
-
-                            return contentBoxHeight;
-                        } else if (property === "width" && CSS.getPropertyValue(element, "boxSizing").toString().toLowerCase() !== "border-box") {
-                            var contentBoxWidth = element.offsetWidth - (parseFloat(CSS.getPropertyValue(element, "borderLeftWidth")) || 0) - (parseFloat(CSS.getPropertyValue(element, "borderRightWidth")) || 0) - (parseFloat(CSS.getPropertyValue(element, "paddingLeft")) || 0) - (parseFloat(CSS.getPropertyValue(element, "paddingRight")) || 0);
-                            revertDisplay();
-
-                            return contentBoxWidth;
-                        }
-                    }
-
-                    var computedStyle;
-
-                    /* For elements that Velocity hasn't been called on directly (e.g. when Velocity queries the DOM on behalf
-                       of a parent of an element its animating), perform a direct getComputedStyle lookup since the object isn't cached. */
-                    if (Data(element) === undefined) {
-                        computedStyle = window.getComputedStyle(element, null); /* GET */
-                    /* If the computedStyle object has yet to be cached, do so now. */
-                    } else if (!Data(element).computedStyle) {
-                        computedStyle = Data(element).computedStyle = window.getComputedStyle(element, null); /* GET */
-                    /* If computedStyle is cached, use it. */
-                    } else {
-                        computedStyle = Data(element).computedStyle;
-                    }
-
-                    /* IE and Firefox do not return a value for the generic borderColor -- they only return individual values for each border side's color.
-                       As a polyfill for querying individual border side colors, just return the top border's color. */
-                    if ((IE || Velocity.State.isFirefox) && property === "borderColor") {
-                        property = "borderTopColor";
-                    }
-
-                    /* IE9 has a bug in which the "filter" property must be accessed from computedStyle using the getPropertyValue method
-                       instead of a direct property lookup. The getPropertyValue method is slower than a direct lookup, which is why we avoid it by default. */
-                    if (IE === 9 && property === "filter") {
-                        computedValue = computedStyle.getPropertyValue(property); /* GET */
-                    } else {
-                        computedValue = computedStyle[property];
-                    }
-
-                    /* Fall back to the property's style value (if defined) when computedValue returns nothing,
-                       which can happen when the element hasn't been painted. */
-                    if (computedValue === "" || computedValue === null) {
-                        computedValue = element.style[property];
-                    }
-
-                    revertDisplay();
-                }
-
-                /* For top, right, bottom, and left (TRBL) values that are set to "auto" on elements of "fixed" or "absolute" position,
-                   defer to jQuery for converting "auto" to a numeric value. (For elements with a "static" or "relative" position, "auto" has the same
-                   effect as being set to 0, so no conversion is necessary.) */
-                /* An example of why numeric conversion is necessary: When an element with "position:absolute" has an untouched "left"
-                   property, which reverts to "auto", left's value is 0 relative to its parent element, but is often non-zero relative
-                   to its *containing* (not parent) element, which is the nearest "position:relative" ancestor or the viewport (and always the viewport in the case of "position:fixed"). */
-                if (computedValue === "auto" && /^(top|right|bottom|left)$/i.test(property)) {
-                    var position = computePropertyValue(element, "position"); /* GET */
-
-                    /* For absolute positioning, jQuery's $.position() only returns values for top and left;
-                       right and bottom will have their "auto" value reverted to 0. */
-                    /* Note: A jQuery object must be created here since jQuery doesn't have a low-level alias for $.position().
-                       Not a big deal since we're currently in a GET batch anyway. */
-                    if (position === "fixed" || (position === "absolute" && /top|left/i.test(property))) {
-                        /* Note: jQuery strips the pixel unit from its returned values; we re-add it here to conform with computePropertyValue's behavior. */
-                        computedValue = $(element).position()[property] + "px"; /* GET */
-                    }
-                }
-
-                return computedValue;
-            }
-
-            var propertyValue;
-
-            /* If this is a hooked property (e.g. "clipLeft" instead of the root property of "clip"),
-               extract the hook's value from a normalized rootPropertyValue using CSS.Hooks.extractValue(). */
-            if (CSS.Hooks.registered[property]) {
-                var hook = property,
-                    hookRoot = CSS.Hooks.getRoot(hook);
-
-                /* If a cached rootPropertyValue wasn't passed in (which Velocity always attempts to do in order to avoid requerying the DOM),
-                   query the DOM for the root property's value. */
-                if (rootPropertyValue === undefined) {
-                    /* Since the browser is now being directly queried, use the official post-prefixing property name for this lookup. */
-                    rootPropertyValue = CSS.getPropertyValue(element, CSS.Names.prefixCheck(hookRoot)[0]); /* GET */
-                }
-
-                /* If this root has a normalization registered, peform the associated normalization extraction. */
-                if (CSS.Normalizations.registered[hookRoot]) {
-                    rootPropertyValue = CSS.Normalizations.registered[hookRoot]("extract", element, rootPropertyValue);
-                }
-
-                /* Extract the hook's value. */
-                propertyValue = CSS.Hooks.extractValue(hook, rootPropertyValue);
-
-            /* If this is a normalized property (e.g. "opacity" becomes "filter" in <=IE8) or "translateX" becomes "transform"),
-               normalize the property's name and value, and handle the special case of transforms. */
-            /* Note: Normalizing a property is mutually exclusive from hooking a property since hook-extracted values are strictly
-               numerical and therefore do not require normalization extraction. */
-            } else if (CSS.Normalizations.registered[property]) {
-                var normalizedPropertyName,
-                    normalizedPropertyValue;
-
-                normalizedPropertyName = CSS.Normalizations.registered[property]("name", element);
-
-                /* Transform values are calculated via normalization extraction (see below), which checks against the element's transformCache.
-                   At no point do transform GETs ever actually query the DOM; initial stylesheet values are never processed.
-                   This is because parsing 3D transform matrices is not always accurate and would bloat our codebase;
-                   thus, normalization extraction defaults initial transform values to their zero-values (e.g. 1 for scaleX and 0 for translateX). */
-                if (normalizedPropertyName !== "transform") {
-                    normalizedPropertyValue = computePropertyValue(element, CSS.Names.prefixCheck(normalizedPropertyName)[0]); /* GET */
-
-                    /* If the value is a CSS null-value and this property has a hook template, use that zero-value template so that hooks can be extracted from it. */
-                    if (CSS.Values.isCSSNullValue(normalizedPropertyValue) && CSS.Hooks.templates[property]) {
-                        normalizedPropertyValue = CSS.Hooks.templates[property][1];
-                    }
-                }
-
-                propertyValue = CSS.Normalizations.registered[property]("extract", element, normalizedPropertyValue);
-            }
-
-            /* If a (numeric) value wasn't produced via hook extraction or normalization, query the DOM. */
-            if (!/^[\d-]/.test(propertyValue)) {
-                /* For SVG elements, dimensional properties (which SVGAttribute() detects) are tweened via
-                   their HTML attribute values instead of their CSS style values. */
-                if (Data(element) && Data(element).isSVG && CSS.Names.SVGAttribute(property)) {
-                    /* Since the height/width attribute values must be set manually, they don't reflect computed values.
-                       Thus, we use use getBBox() to ensure we always get values for elements with undefined height/width attributes. */
-                    if (/^(height|width)$/i.test(property)) {
-                        propertyValue = element.getBBox()[property];
-                    /* Otherwise, access the attribute value directly. */
-                    } else {
-                        propertyValue = element.getAttribute(property);
-                    }
-                } else {
-                    propertyValue = computePropertyValue(element, CSS.Names.prefixCheck(property)[0]); /* GET */
-                }
-            }
-
-            /* Since property lookups are for animation purposes (which entails computing the numeric delta between start and end values),
-               convert CSS null-values to an integer of value 0. */
-            if (CSS.Values.isCSSNullValue(propertyValue)) {
-                propertyValue = 0;
-            }
-
-            if (Velocity.debug >= 2) console.log("Get " + property + ": " + propertyValue);
-
-            return propertyValue;
-        },
-
-        /* The singular setPropertyValue, which routes the logic for all normalizations, hooks, and standard CSS properties. */
-        setPropertyValue: function(element, property, propertyValue, rootPropertyValue, scrollData) {
-            var propertyName = property;
-
-            /* In order to be subjected to call options and element queueing, scroll animation is routed through Velocity as if it were a standard CSS property. */
-            if (property === "scroll") {
-                /* If a container option is present, scroll the container instead of the browser window. */
-                if (scrollData.container) {
-                    scrollData.container["scroll" + scrollData.direction] = propertyValue;
-                /* Otherwise, Velocity defaults to scrolling the browser window. */
-                } else {
-                    if (scrollData.direction === "Left") {
-                        window.scrollTo(propertyValue, scrollData.alternateValue);
-                    } else {
-                        window.scrollTo(scrollData.alternateValue, propertyValue);
-                    }
-                }
-            } else {
-                /* Transforms (translateX, rotateZ, etc.) are applied to a per-element transformCache object, which is manually flushed via flushTransformCache().
-                   Thus, for now, we merely cache transforms being SET. */
-                if (CSS.Normalizations.registered[property] && CSS.Normalizations.registered[property]("name", element) === "transform") {
-                    /* Perform a normalization injection. */
-                    /* Note: The normalization logic handles the transformCache updating. */
-                    CSS.Normalizations.registered[property]("inject", element, propertyValue);
-
-                    propertyName = "transform";
-                    propertyValue = Data(element).transformCache[property];
-                } else {
-                    /* Inject hooks. */
-                    if (CSS.Hooks.registered[property]) {
-                        var hookName = property,
-                            hookRoot = CSS.Hooks.getRoot(property);
-
-                        /* If a cached rootPropertyValue was not provided, query the DOM for the hookRoot's current value. */
-                        rootPropertyValue = rootPropertyValue || CSS.getPropertyValue(element, hookRoot); /* GET */
-
-                        propertyValue = CSS.Hooks.injectValue(hookName, propertyValue, rootPropertyValue);
-                        property = hookRoot;
-                    }
-
-                    /* Normalize names and values. */
-                    if (CSS.Normalizations.registered[property]) {
-                        propertyValue = CSS.Normalizations.registered[property]("inject", element, propertyValue);
-                        property = CSS.Normalizations.registered[property]("name", element);
-                    }
-
-                    /* Assign the appropriate vendor prefix before performing an official style update. */
-                    propertyName = CSS.Names.prefixCheck(property)[0];
-
-                    /* A try/catch is used for IE<=8, which throws an error when "invalid" CSS values are set, e.g. a negative width.
-                       Try/catch is avoided for other browsers since it incurs a performance overhead. */
-                    if (IE <= 8) {
-                        try {
-                            element.style[propertyName] = propertyValue;
-                        } catch (error) { if (Velocity.debug) console.log("Browser does not support [" + propertyValue + "] for [" + propertyName + "]"); }
-                    /* SVG elements have their dimensional properties (width, height, x, y, cx, etc.) applied directly as attributes instead of as styles. */
-                    /* Note: IE8 does not support SVG elements, so it's okay that we skip it for SVG animation. */
-                    } else if (Data(element) && Data(element).isSVG && CSS.Names.SVGAttribute(property)) {
-                        /* Note: For SVG attributes, vendor-prefixed property names are never used. */
-                        /* Note: Not all CSS properties can be animated via attributes, but the browser won't throw an error for unsupported properties. */
-                        element.setAttribute(property, propertyValue);
-                    } else {
-                        element.style[propertyName] = propertyValue;
-                    }
-
-                    if (Velocity.debug >= 2) console.log("Set " + property + " (" + propertyName + "): " + propertyValue);
-                }
-            }
-
-            /* Return the normalized property name and value in case the caller wants to know how these values were modified before being applied to the DOM. */
-            return [ propertyName, propertyValue ];
-        },
-
-        /* To increase performance by batching transform updates into a single SET, transforms are not directly applied to an element until flushTransformCache() is called. */
-        /* Note: Velocity applies transform properties in the same order that they are chronogically introduced to the element's CSS styles. */
-        flushTransformCache: function(element) {
-            var transformString = "";
-
-            /* Certain browsers require that SVG transforms be applied as an attribute. However, the SVG transform attribute takes a modified version of CSS's transform string
-               (units are dropped and, except for skewX/Y, subproperties are merged into their master property -- e.g. scaleX and scaleY are merged into scale(X Y). */
-            if ((IE || (Velocity.State.isAndroid && !Velocity.State.isChrome)) && Data(element).isSVG) {
-                /* Since transform values are stored in their parentheses-wrapped form, we use a helper function to strip out their numeric values.
-                   Further, SVG transform properties only take unitless (representing pixels) values, so it's okay that parseFloat() strips the unit suffixed to the float value. */
-                function getTransformFloat (transformProperty) {
-                    return parseFloat(CSS.getPropertyValue(element, transformProperty));
-                }
-
-                /* Create an object to organize all the transforms that we'll apply to the SVG element. To keep the logic simple,
-                   we process *all* transform properties -- even those that may not be explicitly applied (since they default to their zero-values anyway). */
-                var SVGTransforms = {
-                    translate: [ getTransformFloat("translateX"), getTransformFloat("translateY") ],
-                    skewX: [ getTransformFloat("skewX") ], skewY: [ getTransformFloat("skewY") ],
-                    /* If the scale property is set (non-1), use that value for the scaleX and scaleY values
-                       (this behavior mimics the result of animating all these properties at once on HTML elements). */
-                    scale: getTransformFloat("scale") !== 1 ? [ getTransformFloat("scale"), getTransformFloat("scale") ] : [ getTransformFloat("scaleX"), getTransformFloat("scaleY") ],
-                    /* Note: SVG's rotate transform takes three values: rotation degrees followed by the X and Y values
-                       defining the rotation's origin point. We ignore the origin values (default them to 0). */
-                    rotate: [ getTransformFloat("rotateZ"), 0, 0 ]
-                };
-
-                /* Iterate through the transform properties in the user-defined property map order.
-                   (This mimics the behavior of non-SVG transform animation.) */
-                $.each(Data(element).transformCache, function(transformName) {
-                    /* Except for with skewX/Y, revert the axis-specific transform subproperties to their axis-free master
-                       properties so that they match up with SVG's accepted transform properties. */
-                    if (/^translate/i.test(transformName)) {
-                        transformName = "translate";
-                    } else if (/^scale/i.test(transformName)) {
-                        transformName = "scale";
-                    } else if (/^rotate/i.test(transformName)) {
-                        transformName = "rotate";
-                    }
-
-                    /* Check that we haven't yet deleted the property from the SVGTransforms container. */
-                    if (SVGTransforms[transformName]) {
-                        /* Append the transform property in the SVG-supported transform format. As per the spec, surround the space-delimited values in parentheses. */
-                        transformString += transformName + "(" + SVGTransforms[transformName].join(" ") + ")" + " ";
-
-                        /* After processing an SVG transform property, delete it from the SVGTransforms container so we don't
-                           re-insert the same master property if we encounter another one of its axis-specific properties. */
-                        delete SVGTransforms[transformName];
-                    }
-                });
-            } else {
-                var transformValue,
-                    perspective;
-
-                /* Transform properties are stored as members of the transformCache object. Concatenate all the members into a string. */
-                $.each(Data(element).transformCache, function(transformName) {
-                    transformValue = Data(element).transformCache[transformName];
-
-                    /* Transform's perspective subproperty must be set first in order to take effect. Store it temporarily. */
-                    if (transformName === "transformPerspective") {
-                        perspective = transformValue;
-                        return true;
-                    }
-
-                    /* IE9 only supports one rotation type, rotateZ, which it refers to as "rotate". */
-                    if (IE === 9 && transformName === "rotateZ") {
-                        transformName = "rotate";
-                    }
-
-                    transformString += transformName + transformValue + " ";
-                });
-
-                /* If present, set the perspective subproperty first. */
-                if (perspective) {
-                    transformString = "perspective" + perspective + " " + transformString;
-                }
-            }
-
-            CSS.setPropertyValue(element, "transform", transformString);
-        }
-    };
-
-    /* Register hooks and normalizations. */
-    CSS.Hooks.register();
-    CSS.Normalizations.register();
-
-    /**********************
-       Velocity.animate
-    **********************/
-
-    Velocity.animate = function() {
-
-        /******************
-            Call Chain
-        ******************/
-
-        /* Logic for determining what to return to the call stack when exiting out of Velocity. */
-        function getChain () {
-            /* If we are using the utility function, attempt to return this call's promise. If no promise library was detected,
-               default to null instead of returning the targeted elements so that utility function's return value is standardized. */
-            if (isUtility) {
-                return promiseData.promise || null;
-            /* Otherwise, if we're using $.fn, return the jQuery-/Zepto-wrapped element set. */
-            } else {
-                return elementsWrapped;
-            }
-        }
-
-        /*************************
-           Arguments Assignment
-        *************************/
-
-        /* To allow for expressive CoffeeScript code, Velocity supports an alternative syntax in which "properties" and "options"
-           objects are defined on a container object that's passed in as Velocity's sole argument. */
-        /* Note: Some browsers automatically populate arguments with a "properties" object. We detect it by checking for its default "names" property. */
-        var syntacticSugar = (arguments[0] && (($.isPlainObject(arguments[0].properties) && !arguments[0].properties.names) || Type.isString(arguments[0].properties))),
-            /* Whether Velocity was called via the utility function (as opposed to on a jQuery/Zepto object). */
-            isUtility,
-            /* When Velocity is called via the utility function ($.Velocity.animate()/Velocity.animate()), elements are explicitly
-               passed in as the first parameter. Thus, argument positioning varies. We normalize them here. */
-            elementsWrapped,
-            argumentIndex;
-
-        var elements,
-            propertiesMap,
-            options;
-
-        /* Detect jQuery/Zepto elements being animated via the $.fn method. */
-        if (Type.isWrapped(this)) {
-            isUtility = false;
-
-            argumentIndex = 0;
-            elements = this;
-            elementsWrapped = this;
-        /* Otherwise, raw elements are being animated via the utility function. */
-        } else {
-            isUtility = true;
-
-            argumentIndex = 1;
-            elements = syntacticSugar ? arguments[0].elements : arguments[0];
-        }
-
-        elements = Type.isWrapped(elements) ? [].slice.call(elements) : elements;
-
-        if (!elements) {
-            return;
-        }
-
-        if (syntacticSugar) {
-            propertiesMap = arguments[0].properties;
-            options = arguments[0].options;
-        } else {
-            propertiesMap = arguments[argumentIndex];
-            options = arguments[argumentIndex + 1];
-        }
-
-        /* The length of the element set (in the form of a nodeList or an array of elements) is defaulted to 1 in case a
-           single raw DOM element is passed in (which doesn't contain a length property). */
-        var elementsLength = (Type.isArray(elements) || Type.isNodeList(elements)) ? elements.length : 1,
-            elementsIndex = 0;
-
-        /***************************
-            Argument Overloading
-        ***************************/
-
-        /* Support is included for jQuery's argument overloading: $.animate(propertyMap [, duration] [, easing] [, complete]).
-           Overloading is detected by checking for the absence of an object being passed into options. */
-        /* Note: The stop action does not accept animation options, and is therefore excluded from this check. */
-        if (propertiesMap !== "stop" && !$.isPlainObject(options)) {
-            /* The utility function shifts all arguments one position to the right, so we adjust for that offset. */
-            var startingArgumentPosition = argumentIndex + 1;
-
-            options = {};
-
-            /* Iterate through all options arguments */
-            for (var i = startingArgumentPosition; i < arguments.length; i++) {
-                /* Treat a number as a duration. Parse it out. */
-                /* Note: The following RegEx will return true if passed an array with a number as its first item.
-                   Thus, arrays are skipped from this check. */
-                if (!Type.isArray(arguments[i]) && /^\d/.test(arguments[i])) {
-                    options.duration = parseFloat(arguments[i]);
-                /* Treat strings and arrays as easings. */
-                } else if (Type.isString(arguments[i]) || Type.isArray(arguments[i])) {
-                    options.easing = arguments[i];
-                /* Treat a function as a complete callback. */
-                } else if (Type.isFunction(arguments[i])) {
-                    options.complete = arguments[i];
-                }
-            }
-        }
-
-        /***************
-            Promises
-        ***************/
-
-        var promiseData = { 
-                promise: null,
-                resolver: null,
-                rejecter: null
-            };
-
-        /* If this call was made via the utility function (which is the default method of invocation when jQuery/Zepto are not being used), and if 
-           promise support was detected, create a promise object for this call and store references to its resolver and rejecter methods. The resolve
-           method is used when a call completes naturally or is prematurely stopped by the user. In both cases, completeCall() handles the associated
-           call cleanup and promise resolving logic. The reject method is used when an invalid set of arguments is passed into a Velocity call. */
-        /* Note: Velocity employs a call-based queueing architecture, which means that stopping an animating element actually stops the full call that
-           triggered it -- not that one element exclusively. Similarly, there is one promise per call, and all elements targeted by a Velocity call are
-           grouped together for the purposes of resolving and rejecting a promise. */
-        if (isUtility && Velocity.Promise) {
-            promiseData.promise = new Velocity.Promise(function (resolve, reject) {
-                promiseData.resolver = resolve;
-                promiseData.rejecter = reject;
-            });
-        }
-
-        /*********************
-           Action Detection
-        *********************/
-
-        /* Velocity's behavior is categorized into "actions": Elements can either be specially scrolled into view,
-           or they can be started, stopped, or reversed. If a literal or referenced properties map is passed in as Velocity's
-           first argument, the associated action is "start". Alternatively, "scroll", "reverse", or "stop" can be passed in instead of a properties map. */
-        var action;
-
-        switch (propertiesMap) {
-            case "scroll":
-                action = "scroll";
-                break;
-
-            case "reverse":
-                action = "reverse";
-                break;
-
-            case "stop":
-                /*******************
-                    Action: Stop
-                *******************/
-
-                /* Clear the currently-active delay on each targeted element. */
-                $.each(Type.isNode(elements) ? [ elements ] : elements, function(i, element) {
-                    if (Data(element) && Data(element).delayTimer) {
-                        /* Stop the timer from triggering its cached next() function. */
-                        clearTimeout(Data(element).delayTimer.setTimeout);
-
-                        /* Manually call the next() function so that the subsequent queue items can progress. */
-                        if (Data(element).delayTimer.next) {
-                            Data(element).delayTimer.next();
-                        }
-
-                        delete Data(element).delayTimer;
-                    }
-                });
-
-                var callsToStop = [];
-
-                /* When the stop action is triggered, the elements' currently active call is immediately stopped. The active call might have
-                   been applied to multiple elements, in which case all of the call's elements will be subjected to stopping. When an element
-                   is stopped, the next item in its animation queue is immediately triggered. */
-                /* An additional argument may be passed in to clear an element's remaining queued calls. Either true (which defaults to the "fx" queue)
-                   or a custom queue string can be passed in. */
-                /* Stopping is achieved by traversing active calls for those which contain the targeted element. */
-                /* Note: The stop command runs prior to Queueing since its behavior is intended to take effect *immediately*,
-                   regardless of the element's current queue state. */
-                $.each(Velocity.State.calls, function(i, activeCall) {
-                    /* Inactive calls are set to false by the logic inside completeCall(). Skip them. */
-                    if (activeCall !== false) {
-                        /* If we're operating on a single element, wrap it in an array so that $.each() can iterate over it. */
-                        $.each(Type.isNode(activeCall[1]) ? [ activeCall[1] ] : activeCall[1], function(k, activeElement) {
-                            $.each(Type.isNode(elements) ? [ elements ] : elements, function(l, element) {
-                                /* Check that this call was applied to the target element. */
-                                if (element === activeElement) {
-                                    if (Data(element)) {
-                                        /* Since "reverse" uses cached start values (the previous call's endValues),
-                                           these values must be changed to reflect the final value that the elements were actually tweened to. */
-                                        $.each(Data(element).tweensContainer, function(m, activeTween) {
-                                            activeTween.endValue = activeTween.currentValue;
-                                        });
-                                    }
-
-                                    /* Clear the remaining queued calls. */
-                                    if (options === true || Type.isString(options)) {
-                                        /* The options argument can be overriden with a custom queue's name. */
-                                        var queueName = Type.isString(options) ? options : "";
-
-                                        /* Iterate through the items in the element's queue. */
-                                        $.each($.queue(element, queueName), function(i, item) {
-                                            /* The queue array can contain an "inprogress" sentinal, which we skip. */
-                                            if (Type.isFunction(item)) {
-                                                /* Pass the item's callback a flag indicating that we want to abort from the queue call.
-                                                   (Specifically, the queue will resolve the call's associated promise then abort.)  */
-                                                item(null, true);
-                                            }
-                                        });
-
-                                        /* Clearing the $.queue() array is achieved by resetting it to []. */
-                                        $.queue(element, queueName, []);
-                                    }
-
-                                    callsToStop.push(i);
-                                }
-                            });
-                        });
-                    }
-                });
-
-                /* Prematurely call completeCall() on each matched active call, passing an additional flag to indicate
-                   that the complete callback and display:none setting should be skipped since we're completing prematurely. */
-                $.each(callsToStop, function(i, j) {
-                    completeCall(j, true);
-                });
-
-                if (promiseData.promise) {
-                    /* Immediately resolve the promise associated with this stop call since stop runs synchronously. */
-                    promiseData.resolver(elements);
-                }
-
-                /* Since we're stopping, and not proceeding with queueing, exit out of Velocity. */
-                return getChain();
-
-            default:
-                /* Treat a non-empty plain object as a literal properties map. */
-                if ($.isPlainObject(propertiesMap) && !$.isEmptyObject(propertiesMap)) {
-                    action = "start";
-
-                /****************
-                    Sequences
-                ****************/
-
-                /* Check if a string matches a registered sequence (see Sequences above). */
-                } else if (Type.isString(propertiesMap) && Velocity.Sequences[propertiesMap]) {
-                    var durationOriginal = options.duration,
-                        delayOriginal = options.delay || 0;
-
-                    /* If the backwards option was passed in, reverse the element set so that elements animate from the last to the first. */
-                    if (options.backwards === true) {
-                        elements = (elements.jquery ? [].slice.call(elements) : elements).reverse();
-                    }
-
-                    /* Individually trigger the sequence for each element in the set to prevent users from having to handle iteration logic in their sequence. */
-                    $.each(elements, function(elementIndex, element) {
-                        /* If the stagger option was passed in, successively delay each element by the stagger value (in ms). Retain the original delay value. */
-                        if (parseFloat(options.stagger)) {
-                            options.delay = delayOriginal + (parseFloat(options.stagger) * elementIndex);
-                        } else if (Type.isFunction(options.stagger)) {
-                            options.delay = delayOriginal + options.stagger.call(element, elementIndex, elementsLength);
-                        }
-
-                        /* If the drag option was passed in, successively increase/decrease (depending on the presense of options.backwards)
-                           the duration of each element's animation, using floors to prevent producing very short durations. */
-                        if (options.drag) {
-                            /* Default the duration of UI pack effects (callouts and transitions) to 1000ms instead of the usual default duration of 400ms. */
-                            options.duration = parseFloat(durationOriginal) || (/^(callout|transition)/.test(propertiesMap) ? 1000 : DEFAULT_DURATION);
-
-                            /* For each element, take the greater duration of: A) animation completion percentage relative to the original duration,
-                               B) 75% of the original duration, or C) a 200ms fallback (in case duration is already set to a low value).
-                               The end result is a baseline of 75% of the sequence's duration that increases/decreases as the end of the element set is approached. */
-                            options.duration = Math.max(options.duration * (options.backwards ? 1 - elementIndex/elementsLength : (elementIndex + 1) / elementsLength), options.duration * 0.75, 200);
-                        }
-
-                        /* Pass in the call's options object so that the sequence can optionally extend it. It defaults to an empty object instead of null to
-                           reduce the options checking logic required inside the sequence. */
-                        Velocity.Sequences[propertiesMap].call(element, element, options || {}, elementIndex, elementsLength, elements, promiseData.promise ? promiseData : undefined);
-                    });
-
-                    /* Since the animation logic resides within the sequence's own code, abort the remainder of this call.
-                       (The performance overhead up to this point is virtually non-existant.) */
-                    /* Note: The jQuery call chain is kept intact by returning the complete element set. */
-                    return getChain();
-                } else {
-                    var abortError = "Velocity: First argument (" + propertiesMap + ") was not a property map, a known action, or a registered sequence. Aborting.";
-
-                    if (promiseData.promise) {
-                        promiseData.rejecter(new Error(abortError));
-                    } else {
-                        console.log(abortError);
-                    }
-
-                    return getChain();
-                }
-        }
-
-        /**************************
-            Call-Wide Variables
-        **************************/
-
-        /* A container for CSS unit conversion ratios (e.g. %, rem, and em ==> px) that is used to cache ratios across all properties
-           being animated in a single Velocity call. Calculating unit ratios necessitates DOM querying and updating, and is therefore
-           avoided (via caching) wherever possible; further, ratios are only calculated when they're needed. */
-        /* Note: This container is call-wide instead of page-wide to avoid the risk of using stale conversion metrics across
-           Velocity animations that are not immediately consecutively chained. */
-        var unitConversionRatios = {
-                /* Performance optimization insight: When the parent element, CSS position value, and fontSize do not differ amongst elements,
-                   the elements' unit ratios are identical. */
-                lastParent: null,
-                lastPosition: null,
-                lastFontSize: null,
-                /* Percent is the only unit types whose ratio is dependant upon axis. */
-                lastPercentToPxWidth: null,
-                lastPercentToPxHeight: null,
-                lastEmToPx: null,
-                /* The rem==>px ratio is relative to the document's fontSize -- not any property belonging to the element.
-                   Thus, it is automatically call-wide cached whenever the rem unit is being animated. */
-                remToPx: null,
-                /* Similarly, viewport units are relative to the window's current dimensions. */
-                vwToPx: null,
-                vhToPx: null
-            };
-
-        /* A container for all the ensuing tween data and metadata associated with this call.
-           This container gets pushed to the page-wide Velocity.State.calls array that is processed during animation ticking. */
-        var call = [];
-
-        /************************
-           Element Processing
-        ************************/
-
-        /* Element processing consists of three parts -- data processing that cannot go stale and data processing that *can* go stale (i.e. third-party style modifications):
-           1) Pre-Queueing: Element-wide variables, including the element's data storage, are instantiated. Call options are prepared. If triggered, the Stop action is executed.
-           2) Queueing: The logic that runs once this call has reached its point of execution in the element's $.queue() stack. Most logic is placed here to avoid risking it becoming stale.
-           3) Pushing: Consolidation of the tween data followed by its push onto the global in-progress calls container.
-        */
-
-        function processElement () {
-
-            /*************************
-               Part I: Pre-Queueing
-            *************************/
-
-            /***************************
-               Element-Wide Variables
-            ***************************/
-
-            var element = this,
-                /* The runtime opts object is the extension of the current call's options and Velocity's page-wide option defaults. */
-                opts = $.extend({}, Velocity.defaults, options),
-                /* A container for the processed data associated with each property in the propertyMap.
-                   (Each property in the map produces its own "tween".) */
-                tweensContainer = {};
-
-            /******************
-                Data Cache
-            ******************/
-
-            /* A primary design goal of Velocity is to cache data wherever possible in order to avoid DOM requerying.
-               Accordingly, each element has a data cache instantiated on it. */
-            if (Data(element) === undefined) {
-                $.data(element, NAME, {
-                    /* Store whether this is an SVG element, since its properties are retrieved and updated differently than standard HTML elements. */
-                    isSVG: Type.isSVG(element),
-                    /* Keep track of whether the element is currently being animated by Velocity.
-                       This is used to ensure that property values are not transferred between non-consecutive (stale) calls. */
-                    isAnimating: false,
-                    /* A reference to the element's live computedStyle object. Learn more here: https://developer.mozilla.org/en/docs/Web/API/window.getComputedStyle */
-                    computedStyle: null,
-                    /* Tween data is cached for each animation on the element so that data can be passed across calls --
-                       in particular, end values are used as subsequent start values in consecutive Velocity calls. */
-                    tweensContainer: null,
-                    /* The full root property values of each CSS hook being animated on this element are cached so that:
-                       1) Concurrently-animating hooks sharing the same root can have their root values' merged into one while tweening.
-                       2) Post-hook-injection root values can be transferred over to consecutively chained Velocity calls as starting root values. */
-                    rootPropertyValueCache: {},
-                    /* A cache for transform updates, which must be manually flushed via CSS.flushTransformCache(). */
-                    transformCache: {}
-                });
-            }
-
-            /******************
-               Option: Delay
-            ******************/
-
-            /* Since queue:false doesn't respect the item's existing queue, we avoid injecting its delay here (it's set later on). */
-            /* Note: Velocity rolls its own delay function since jQuery doesn't have a utility alias for $.fn.delay()
-               (and thus requires jQuery element creation, which we avoid since its overhead includes DOM querying). */
-            if (parseFloat(opts.delay) && opts.queue !== false) {
-                $.queue(element, opts.queue, function(next) {
-                    /* This is a flag used to indicate to the upcoming completeCall() function that this queue entry was initiated by Velocity. See completeCall() for further details. */
-                    Velocity.velocityQueueEntryFlag = true;
-
-                    /* The ensuing queue item (which is assigned to the "next" argument that $.queue() automatically passes in) will be triggered after a setTimeout delay. 
-                       The setTimeout is stored so that it can be subjected to clearTimeout() if this animation is prematurely stopped via Velocity's "stop" command. */
-                    Data(element).delayTimer = { 
-                        setTimeout: setTimeout(next, parseFloat(opts.delay)),
-                        next: next
-                    };
-                });
-            }
-
-            /*********************
-               Option: Duration
-            *********************/
-
-            /* In mock mode, all animations are forced to 1ms so that they occur immediately upon the next rAF tick. */
-            if (Velocity.mock === true) {
-                opts.duration = 1;
-            } else {
-                /* Support for jQuery's named durations. */
-                switch (opts.duration.toString().toLowerCase()) {
-                    case "fast":
-                        opts.duration = 200;
-                        break;
-
-                    case "normal":
-                        opts.duration = DEFAULT_DURATION;
-                        break;
-
-                    case "slow":
-                        opts.duration = 600;
-                        break;
-
-                    default:
-                        /* Remove the potential "ms" suffix and default to 1 if the user is attempting to set a duration of 0 (in order to produce an immediate style change). */
-                        opts.duration = parseFloat(opts.duration) || 1;
-                }
-            }
-
-            /*******************
-               Option: Easing
-            *******************/
-
-            opts.easing = getEasing(opts.easing, opts.duration);
-
-            /**********************
-               Option: Callbacks
-            **********************/
-
-            /* Callbacks must functions. Otherwise, default to null. */
-            if (opts.begin && !Type.isFunction(opts.begin)) {
-                opts.begin = null;
-            }
-
-            if (opts.progress && !Type.isFunction(opts.progress)) {
-                opts.progress = null;
-            }
-
-            if (opts.complete && !Type.isFunction(opts.complete)) {
-                opts.complete = null;
-            }
-
-            /*********************************
-               Option: Display & Visibility
-            *********************************/
-
-            /* Refer to Velocity's documentation (VelocityJS.org/#displayAndVisibility) for a description of the display and visibility options' behavior. */
-            if (opts.display) {
-                opts.display = opts.display.toString().toLowerCase();
-
-                /* Users can pass in a special "auto" value to instruct Velocity to set the element to its default display value. */
-                if (opts.display === "auto") {
-                    opts.display = Velocity.CSS.Values.getDisplayType(element);
-                }
-            }
-
-            if (opts.visibility) {
-                opts.visibility = opts.visibility.toString().toLowerCase();
-            }
-
-            /**********************
-               Option: mobileHA
-            **********************/
-
-            /* When set to true, and if this is a mobile device, mobileHA automatically enables hardware acceleration (via a null transform hack)
-               on animating elements. HA is removed from the element at the completion of its animation. */
-            /* Note: Android Gingerbread doesn't support HA. If a null transform hack (mobileHA) is in fact set, it will prevent other tranform subproperties from taking effect. */
-            /* Note: You can read more about the use of mobileHA in Velocity's documentation: VelocityJS.org/#mobileHA. */
-            opts.mobileHA = (opts.mobileHA && Velocity.State.isMobile && !Velocity.State.isGingerbread);
-
-            /***********************
-               Part II: Queueing
-            ***********************/
-
-            /* When a set of elements is targeted by a Velocity call, the set is broken up and each element has the current Velocity call individually queued onto it.
-               In this way, each element's existing queue is respected; some elements may already be animating and accordingly should not have this current Velocity call triggered immediately. */
-            /* In each queue, tween data is processed for each animating property then pushed onto the call-wide calls array. When the last element in the set has had its tweens processed,
-               the call array is pushed to Velocity.State.calls for live processing by the requestAnimationFrame tick. */
-            function buildQueue (next) {
-
-                /*******************
-                   Option: Begin
-                *******************/
-
-                /* The begin callback is fired once per call -- not once per elemenet -- and is passed the full raw DOM element set as both its context and its first argument. */
-                if (opts.begin && elementsIndex === 0) {
-                    /* We throw callbacks in a setTimeout so that thrown errors don't halt the execution of Velocity itself. */
-                    try {
-                        opts.begin.call(elements, elements);
-                    } catch (error) { 
-                        setTimeout(function() {
-                            throw error;
-                        }, 1);
-                    }
-                }
-
-                /*****************************************
-                   Tween Data Construction (for Scroll)
-                *****************************************/
-
-                /* Note: In order to be subjected to chaining and animation options, scroll's tweening is routed through Velocity as if it were a standard CSS property animation. */
-                if (action === "scroll") {
-                    /* The scroll action uniquely takes an optional "offset" option -- specified in pixels -- that offsets the targeted scroll position. */
-                    var scrollDirection = (/^x$/i.test(opts.axis) ? "Left" : "Top"),
-                        scrollOffset = parseFloat(opts.offset) || 0,
-                        scrollPositionCurrent,
-                        scrollPositionCurrentAlternate,
-                        scrollPositionEnd;
-
-                    /* Scroll also uniquely takes an optional "container" option, which indicates the parent element that should be scrolled --
-                       as opposed to the browser window itself. This is useful for scrolling toward an element that's inside an overflowing parent element. */
-                    if (opts.container) {
-                        /* Ensure that either a jQuery object or a raw DOM element was passed in. */
-                        if (opts.container.jquery || Type.isNode(opts.container)) {
-                            /* Extract the raw DOM element from the jQuery wrapper. */
-                            opts.container = opts.container[0] || opts.container;
-                            /* Note: Unlike other properties in Velocity, the browser's scroll position is never cached since it so frequently changes
-                               (due to the user's natural interaction with the page). */
-                            scrollPositionCurrent = opts.container["scroll" + scrollDirection]; /* GET */
-
-                            /* $.position() values are relative to the container's currently viewable area (without taking into account the container's true dimensions
-                               -- say, for example, if the container was not overflowing). Thus, the scroll end value is the sum of the child element's position *and*
-                               the scroll container's current scroll position. */
-                            /* Note: jQuery does not offer a utility alias for $.position(), so we have to incur jQuery object conversion here.
-                               This syncs up with an ensuing batch of GETs, so it fortunately does not trigger layout thrashing. */
-                            scrollPositionEnd = (scrollPositionCurrent + $(element).position()[scrollDirection.toLowerCase()]) + scrollOffset; /* GET */
-                        /* If a value other than a jQuery object or a raw DOM element was passed in, default to null so that this option is ignored. */
-                        } else {
-                            opts.container = null;
-                        }
-                    } else {
-                        /* If the window itself is being scrolled -- not a containing element -- perform a live scroll position lookup using
-                           the appropriate cached property names (which differ based on browser type). */
-                        scrollPositionCurrent = Velocity.State.scrollAnchor[Velocity.State["scrollProperty" + scrollDirection]]; /* GET */
-                        /* When scrolling the browser window, cache the alternate axis's current value since window.scrollTo() doesn't let us change only one value at a time. */
-                        scrollPositionCurrentAlternate = Velocity.State.scrollAnchor[Velocity.State["scrollProperty" + (scrollDirection === "Left" ? "Top" : "Left")]]; /* GET */
-
-                        /* Unlike $.position(), $.offset() values are relative to the browser window's true dimensions -- not merely its currently viewable area --
-                           and therefore end values do not need to be compounded onto current values. */
-                        scrollPositionEnd = $(element).offset()[scrollDirection.toLowerCase()] + scrollOffset; /* GET */
-                    }
-
-                    /* Since there's only one format that scroll's associated tweensContainer can take, we create it manually. */
-                    tweensContainer = {
-                        scroll: {
-                            rootPropertyValue: false,
-                            startValue: scrollPositionCurrent,
-                            currentValue: scrollPositionCurrent,
-                            endValue: scrollPositionEnd,
-                            unitType: "",
-                            easing: opts.easing,
-                            scrollData: {
-                                container: opts.container,
-                                direction: scrollDirection,
-                                alternateValue: scrollPositionCurrentAlternate
-                            }
-                        },
-                        element: element
-                    };
-
-                    if (Velocity.debug) console.log("tweensContainer (scroll): ", tweensContainer.scroll, element);
-
-                /******************************************
-                   Tween Data Construction (for Reverse)
-                ******************************************/
-
-                /* Reverse acts like a "start" action in that a property map is animated toward. The only difference is
-                   that the property map used for reverse is the inverse of the map used in the previous call. Thus, we manipulate
-                   the previous call to construct our new map: use the previous map's end values as our new map's start values. Copy over all other data. */
-                /* Note: Reverse can be directly called via the "reverse" parameter, or it can be indirectly triggered via the loop option. (Loops are composed of multiple reverses.) */
-                /* Note: Reverse calls do not need to be consecutively chained onto a currently-animating element in order to operate on cached values;
-                   there is no harm to reverse being called on a potentially stale data cache since reverse's behavior is simply defined
-                   as reverting to the element's values as they were prior to the previous *Velocity* call. */
-                } else if (action === "reverse") {
-                    /* Abort if there is no prior animation data to reverse to. */
-                    if (!Data(element).tweensContainer) {
-                        /* Dequeue the element so that this queue entry releases itself immediately, allowing subsequent queue entries to run. */
-                        $.dequeue(element, opts.queue);
-
-                        return;
-                    } else {
-                        /*********************
-                           Options Parsing
-                        *********************/
-
-                        /* If the element was hidden via the display option in the previous call,
-                           revert display to block prior to reversal so that the element is visible again. */
-                        if (Data(element).opts.display === "none") {
-                            Data(element).opts.display = "block";
-                        }
-
-                        if (Data(element).opts.visibility === "hidden") {
-                            Data(element).opts.visibility = "visible";
-                        }
-
-                        /* If the loop option was set in the previous call, disable it so that "reverse" calls aren't recursively generated.
-                           Further, remove the previous call's callback options; typically, users do not want these to be refired. */
-                        Data(element).opts.loop = false;
-                        Data(element).opts.begin = null;
-                        Data(element).opts.complete = null;
-
-                        /* Since we're extending an opts object that has already been extended with the defaults options object,
-                           we remove non-explicitly-defined properties that are auto-assigned values. */
-                        if (!options.easing) {
-                            delete opts.easing;
-                        }
-
-                        if (!options.duration) {
-                            delete opts.duration;
-                        }
-
-                        /* The opts object used for reversal is an extension of the options object optionally passed into this
-                           reverse call plus the options used in the previous Velocity call. */
-                        opts = $.extend({}, Data(element).opts, opts);
-
-                        /*************************************
-                           Tweens Container Reconstruction
-                        *************************************/
-
-                        /* Create a deepy copy (indicated via the true flag) of the previous call's tweensContainer. */
-                        var lastTweensContainer = $.extend(true, {}, Data(element).tweensContainer);
-
-                        /* Manipulate the previous tweensContainer by replacing its end values and currentValues with its start values. */
-                        for (var lastTween in lastTweensContainer) {
-                            /* In addition to tween data, tweensContainers contain an element property that we ignore here. */
-                            if (lastTween !== "element") {
-                                var lastStartValue = lastTweensContainer[lastTween].startValue;
-
-                                lastTweensContainer[lastTween].startValue = lastTweensContainer[lastTween].currentValue = lastTweensContainer[lastTween].endValue;
-                                lastTweensContainer[lastTween].endValue = lastStartValue;
-
-                                /* Easing is the only option that embeds into the individual tween data (since it can be defined on a per-property basis).
-                                   Accordingly, every property's easing value must be updated when an options object is passed in with a reverse call.
-                                   The side effect of this extensibility is that all per-property easing values are forcefully reset to the new value. */
-                                if (!$.isEmptyObject(options)) {
-                                    lastTweensContainer[lastTween].easing = opts.easing;
-                                }
-
-                                if (Velocity.debug) console.log("reverse tweensContainer (" + lastTween + "): " + JSON.stringify(lastTweensContainer[lastTween]), element);
-                            }
-                        }
-
-                        tweensContainer = lastTweensContainer;
-                    }
-
-                /*****************************************
-                   Tween Data Construction (for Start)
-                *****************************************/
-
-                } else if (action === "start") {
-
-                    /*************************
-                        Value Transferring
-                    *************************/
-
-                    /* If this queue entry follows a previous Velocity-initiated queue entry *and* if this entry was created
-                       while the element was in the process of being animated by Velocity, then this current call is safe to use
-                       the end values from the prior call as its start values. Velocity attempts to perform this value transfer
-                       process whenever possible in order to avoid requerying the DOM. */
-                    /* If values aren't transferred from a prior call and start values were not forcefed by the user (more on this below),
-                       then the DOM is queried for the element's current values as a last resort. */
-                    /* Note: Conversely, animation reversal (and looping) *always* perform inter-call value transfers; they never requery the DOM. */
-                    var lastTweensContainer;
-
-                    /* The per-element isAnimating flag is used to indicate whether it's safe (i.e. the data isn't stale)
-                       to transfer over end values to use as start values. If it's set to true and there is a previous
-                       Velocity call to pull values from, do so. */
-                    if (Data(element).tweensContainer && Data(element).isAnimating === true) {
-                        lastTweensContainer = Data(element).tweensContainer;
-                    }
-
-                    /***************************
-                       Tween Data Calculation
-                    ***************************/
-
-                    /* This function parses property data and defaults endValue, easing, and startValue as appropriate. */
-                    /* Property map values can either take the form of 1) a single value representing the end value,
-                       or 2) an array in the form of [ endValue, [, easing] [, startValue] ].
-                       The optional third parameter is a forcefed startValue to be used instead of querying the DOM for
-                       the element's current value. Read Velocity's docmentation to learn more about forcefeeding: VelocityJS.org/#forcefeeding */
-                    function parsePropertyValue (valueData, skipResolvingEasing) {
-                        var endValue = undefined,
-                            easing = undefined,
-                            startValue = undefined;
-
-                        /* Handle the array format, which can be structured as one of three potential overloads:
-                           A) [ endValue, easing, startValue ], B) [ endValue, easing ], or C) [ endValue, startValue ] */
-                        if (Type.isArray(valueData)) {
-                            /* endValue is always the first item in the array. Don't bother validating endValue's value now
-                               since the ensuing property cycling logic does that. */
-                            endValue = valueData[0];
-
-                            /* Two-item array format: If the second item is a number, function, or hex string, treat it as a
-                               start value since easings can only be non-hex strings or arrays. */
-                            if ((!Type.isArray(valueData[1]) && /^[\d-]/.test(valueData[1])) || Type.isFunction(valueData[1]) || CSS.RegEx.isHex.test(valueData[1])) {
-                                startValue = valueData[1];
-                            /* Two or three-item array: If the second item is a non-hex string or an array, treat it as an easing. */
-                            } else if ((Type.isString(valueData[1]) && !CSS.RegEx.isHex.test(valueData[1])) || Type.isArray(valueData[1])) {
-                                easing = skipResolvingEasing ? valueData[1] : getEasing(valueData[1], opts.duration);
-
-                                /* Don't bother validating startValue's value now since the ensuing property cycling logic inherently does that. */
-                                if (valueData[2] !== undefined) {
-                                    startValue = valueData[2];
-                                }
-                            }
-                        /* Handle the single-value format. */
-                        } else {
-                            endValue = valueData;
-                        }
-
-                        /* Default to the call's easing if a per-property easing type was not defined. */
-                        easing = easing || opts.easing;
-
-                        /* If functions were passed in as values, pass the function the current element as its context,
-                           plus the element's index and the element set's size as arguments. Then, assign the returned value. */
-                        if (Type.isFunction(endValue)) {
-                            endValue = endValue.call(element, elementsIndex, elementsLength);
-                        }
-
-                        if (Type.isFunction(startValue)) {
-                            startValue = startValue.call(element, elementsIndex, elementsLength);
-                        }
-
-                        /* Allow startValue to be left as undefined to indicate to the ensuing code that its value was not forcefed. */
-                        return [ endValue || 0, easing, startValue ];
-                    }
-
-                    /* Cycle through each property in the map, looking for shorthand color properties (e.g. "color" as opposed to "colorRed"). Inject the corresponding
-                       colorRed, colorGreen, and colorBlue RGB component tweens into the propertiesMap (which Velocity understands) and remove the shorthand property. */
-                    $.each(propertiesMap, function(property, value) {
-                        /* Parse the value data for each shorthand. */
-                        var valueData = parsePropertyValue(value, true),
-                            endValue = valueData[0],
-                            easing = valueData[1],
-                            startValue = valueData[2];
-
-                        /* Find shorthand color properties that have been passed a hex string. */
-                        if (RegExp(CSS.Lists.colors.join("|")).test(property) && CSS.RegEx.isHex.test(endValue)) {
-                            /* Convert the hex strings into their RGB component arrays. */
-                            var colorComponents = [ "Red", "Green", "Blue" ],
-                                endValueRGB = CSS.Values.hexToRgb(endValue),
-                                startValueRGB = startValue ? CSS.Values.hexToRgb(startValue) : undefined;
-
-                            /* Inject the RGB component tweens into propertiesMap. */
-                            for (var i = 0; i < colorComponents.length; i++) {
-                                propertiesMap[property + colorComponents[i]] = [ endValueRGB[i], easing, startValueRGB ? startValueRGB[i] : startValueRGB ]; 
-                            }
-
-                            /* Remove the intermediary shorthand property entry now that we've processed it. */
-                            delete propertiesMap[property];
-                        }                        
-                    });
-
-                    /* Create a tween out of each property, and append its associated data to tweensContainer. */
-                    for (var property in propertiesMap) {
-
-                        /**************************
-                           Start Value Sourcing
-                        **************************/
-
-                        /* Parse out endValue, easing, and startValue from the property's data. */
-                        var valueData = parsePropertyValue(propertiesMap[property]),
-                            endValue = valueData[0],
-                            easing = valueData[1],
-                            startValue = valueData[2];
-
-                        /* Now that the original property name's format has been used for the parsePropertyValue() lookup above,
-                           we force the property to its camelCase styling to normalize it for manipulation. */
-                        property = CSS.Names.camelCase(property);
-
-                        /* In case this property is a hook, there are circumstances where we will intend to work on the hook's root property and not the hooked subproperty. */
-                        var rootProperty = CSS.Hooks.getRoot(property),
-                            rootPropertyValue = false;
-
-                        /* Properties that are not supported by the browser (and do not have an associated normalization) will
-                           inherently produce no style changes when set, so they are skipped in order to decrease animation tick overhead.
-                           Property support is determined via prefixCheck(), which returns a false flag when no supported is detected. */
-                        /* Note: Since SVG elements have some of their properties directly applied as HTML attributes,
-                           there is no way to check for their explicit browser support, and so we skip skip this check for them. */
-                        if (!Data(element).isSVG && CSS.Names.prefixCheck(rootProperty)[1] === false && CSS.Normalizations.registered[rootProperty] === undefined) {
-                            if (Velocity.debug) console.log("Skipping [" + rootProperty + "] due to a lack of browser support.");
-
-                            continue;
-                        }
-
-                        /* If the display option is being set to a non-"none" (e.g. "block") and opacity (filter on IE<=8) is being
-                           animated to an endValue of non-zero, the user's intention is to fade in from invisible, thus we forcefeed opacity
-                           a startValue of 0 if its startValue hasn't already been sourced by value transferring or prior forcefeeding. */
-                        if (((opts.display && opts.display !== "none") || (opts.visibility && opts.visibility !== "hidden")) && /opacity|filter/.test(property) && !startValue && endValue !== 0) {
-                            startValue = 0;
-                        }
-
-                        /* If values have been transferred from the previous Velocity call, extract the endValue and rootPropertyValue
-                           for all of the current call's properties that were *also* animated in the previous call. */
-                        /* Note: Value transferring can optionally be disabled by the user via the _cacheValues option. */
-                        if (opts._cacheValues && lastTweensContainer && lastTweensContainer[property]) {
-                            if (startValue === undefined) {
-                                startValue = lastTweensContainer[property].endValue + lastTweensContainer[property].unitType;
-                            }
-
-                            /* The previous call's rootPropertyValue is extracted from the element's data cache since that's the
-                               instance of rootPropertyValue that gets freshly updated by the tweening process, whereas the rootPropertyValue
-                               attached to the incoming lastTweensContainer is equal to the root property's value prior to any tweening. */
-                            rootPropertyValue = Data(element).rootPropertyValueCache[rootProperty];
-                        /* If values were not transferred from a previous Velocity call, query the DOM as needed. */
-                        } else {
-                            /* Handle hooked properties. */
-                            if (CSS.Hooks.registered[property]) {
-                               if (startValue === undefined) {
-                                    rootPropertyValue = CSS.getPropertyValue(element, rootProperty); /* GET */
-                                    /* Note: The following getPropertyValue() call does not actually trigger a DOM query;
-                                       getPropertyValue() will extract the hook from rootPropertyValue. */
-                                    startValue = CSS.getPropertyValue(element, property, rootPropertyValue);
-                                /* If startValue is already defined via forcefeeding, do not query the DOM for the root property's value;
-                                   just grab rootProperty's zero-value template from CSS.Hooks. This overwrites the element's actual
-                                   root property value (if one is set), but this is acceptable since the primary reason users forcefeed is
-                                   to avoid DOM queries, and thus we likewise avoid querying the DOM for the root property's value. */
-                                } else {
-                                    /* Grab this hook's zero-value template, e.g. "0px 0px 0px black". */
-                                    rootPropertyValue = CSS.Hooks.templates[rootProperty][1];
-                                }
-                            /* Handle non-hooked properties that haven't already been defined via forcefeeding. */
-                            } else if (startValue === undefined) {
-                                startValue = CSS.getPropertyValue(element, property); /* GET */
-                            }
-                        }
-
-                        /**************************
-                           Value Data Extraction
-                        **************************/
-
-                        var separatedValue,
-                            endValueUnitType,
-                            startValueUnitType,
-                            operator = false;
-
-                        /* Separates a property value into its numeric value and its unit type. */
-                        function separateValue (property, value) {
-                            var unitType,
-                                numericValue;
-
-                            numericValue = (value || 0)
-                                .toString()
-                                .toLowerCase()
-                                /* Match the unit type at the end of the value. */
-                                .replace(/[%A-z]+$/, function(match) {
-                                    /* Grab the unit type. */
-                                    unitType = match;
-
-                                    /* Strip the unit type off of value. */
-                                    return "";
-                                });
-
-                            /* If no unit type was supplied, assign one that is appropriate for this property (e.g. "deg" for rotateZ or "px" for width). */
-                            if (!unitType) {
-                                unitType = CSS.Values.getUnitType(property);
-                            }
-
-                            return [ numericValue, unitType ];
-                        }
-
-                        /* Separate startValue. */
-                        separatedValue = separateValue(property, startValue);
-                        startValue = separatedValue[0];
-                        startValueUnitType = separatedValue[1];
-
-                        /* Separate endValue, and extract a value operator (e.g. "+=", "-=") if one exists. */
-                        separatedValue = separateValue(property, endValue);
-                        endValue = separatedValue[0].replace(/^([+-\/*])=/, function(match, subMatch) {
-                            operator = subMatch;
-
-                            /* Strip the operator off of the value. */
-                            return "";
-                        });
-                        endValueUnitType = separatedValue[1];
-
-                        /* Parse float values from endValue and startValue. Default to 0 if NaN is returned. */
-                        startValue = parseFloat(startValue) || 0;
-                        endValue = parseFloat(endValue) || 0;
-
-                        /*****************************
-                           Value & Unit Conversion
-                        *****************************/
-
-                        var elementUnitRatios;
-
-                        /* Custom support for properties that don't actually accept the % unit type, but where pollyfilling is trivial and relatively foolproof. */
-                        if (endValueUnitType === "%") {
-                            /* A %-value fontSize/lineHeight is relative to the parent's fontSize (as opposed to the parent's dimensions),
-                               which is identical to the em unit's behavior, so we piggyback off of that. */
-                            if (/^(fontSize|lineHeight)$/.test(property)) {
-                                /* Convert % into an em decimal value. */
-                                endValue = endValue / 100;
-                                endValueUnitType = "em";
-                            /* For scaleX and scaleY, convert the value into its decimal format and strip off the unit type. */
-                            } else if (/^scale/.test(property)) {
-                                endValue = endValue / 100;
-                                endValueUnitType = "";
-                            /* For RGB components, take the defined percentage of 255 and strip off the unit type. */
-                            } else if (/(Red|Green|Blue)$/i.test(property)) {
-                                endValue = (endValue / 100) * 255;
-                                endValueUnitType = "";
-                            }
-                        }
-
-                        /* When queried, the browser returns (most) CSS property values in pixels. Therefore, if an endValue with a unit type of
-                           %, em, or rem is animated toward, startValue must be converted from pixels into the same unit type as endValue in order
-                           for value manipulation logic (increment/decrement) to proceed. Further, if the startValue was forcefed or transferred
-                           from a previous call, startValue may also not be in pixels. Unit conversion logic therefore consists of two steps:
-                           1) Calculating the ratio of %,/em/rem relative to pixels then 2) Converting startValue into the same unit of measurement as endValue based on these ratios. */
-                        /* Unit conversion ratios are calculated by momentarily setting a value with the target unit type on the element,
-                           comparing the returned pixel value, then reverting to the original value. */
-                        /* Note: Even if only one of these unit types is being animated, all unit ratios are calculated at once since the overhead
-                           of batching the SETs and GETs together upfront outweights the potential overhead
-                                 of layout thrashing caused by re-querying for uncalculated ratios for subsequently-processed properties. */
-                        /* Note: Instead of adjusting the CSS properties on the target element, an alternative way of performing value conversion
-                           is to inject a cloned element into the element's parent and manipulate *its* values instead.
-                           This is a cleaner method that avoids the ensuing rounds of layout thrashing, but it's ultimately less performant.
-                           due to the overhead involved with DOM tree modification (element insertion/deletion). */
-                        /* Todo: Shift this logic into the calls' first tick instance so that it's synced with RAF. */
-                        /* Todo: Store the original values and skip re-setting if we're animating height or width in the properties map. */
-                        function calculateUnitRatios () {
-                            /* The properties below are used to determine whether the element differs sufficiently from this same call's
-                               prior element (in the overall element set) to also differ in its unit conversion ratios. If the properties
-                               match up with those of the prior element, the prior element's conversion ratios are used. Like most optimizations
-                               in Velocity, this is done to minimize DOM querying. */
-                            var sameRatioIndicators = {
-                                    parent: element.parentNode, /* GET */
-                                    position: CSS.getPropertyValue(element, "position"), /* GET */
-                                    fontSize: CSS.getPropertyValue(element, "fontSize") /* GET */
-                                },
-                                /* Determine if the same % ratio can be used. % is relative to the element's position value and the parent's width and height dimensions. */
-                                sameBasePercent = ((sameRatioIndicators.position === unitConversionRatios.lastPosition) && (sameRatioIndicators.parent === unitConversionRatios.lastParent)),
-                                /* Determine if the same em ratio can be used. em is relative to the element's fontSize, which itself is relative to the parent's fontSize. */
-                                sameBaseEm = ((sameRatioIndicators.fontSize === unitConversionRatios.lastFontSize) && (sameRatioIndicators.parent === unitConversionRatios.lastParent));
-
-                            /* Store these ratio indicators call-wide for the next element to compare against. */
-                            unitConversionRatios.lastParent = sameRatioIndicators.parent;
-                            unitConversionRatios.lastPosition = sameRatioIndicators.position;
-                            unitConversionRatios.lastFontSize = sameRatioIndicators.fontSize;
-
-                            /* Whereas % and em ratios are determined on a per-element basis, the rem unit type only needs to be checked
-                               once per call since it is exclusively dependant upon document.body's fontSize. If this is the first time
-                               that calculateUnitRatios() is being run during this call, remToPx will still be set to its default value of null, so we calculate it now. */
-                            if (unitConversionRatios.remToPx === null) {
-                                /* Default to most browsers' default fontSize of 16px in the case of 0. */
-                                unitConversionRatios.remToPx = parseFloat(CSS.getPropertyValue(document.body, "fontSize")) || 16; /* GET */
-                            }
-
-                            /* The viewport units are relative to the window's inner dimensions. */
-                            if (unitConversionRatios.vwToPx === null) {
-                                unitConversionRatios.vwToPx = parseFloat(window.innerWidth) / 100; /* GET */
-                                unitConversionRatios.vhToPx = parseFloat(window.innerHeight) / 100; /* GET */
-                            }
-
-                            var originalValues = {
-                                    /* To accurately and consistently calculate conversion ratios, the element's overflow and box-sizing are temporarily removed.
-                                       Both properties modify an element's visible dimensions. */
-                                    /* Note: Overflow must be manipulated on a per-axis basis since the plain overflow property overwrites its subproperties' values. */
-                                    overflowX: null,
-                                    overflowY: null,
-                                    boxSizing: null,
-                                    /* width and height act as our proxy properties for measuring the horizontal and vertical % ratios.
-                                       Since they can be artificially constrained by their min-/max- equivalents, those properties are converted as well. */
-                                    width: null,
-                                    minWidth: null,
-                                    maxWidth: null,
-                                    height: null,
-                                    minHeight: null,
-                                    maxHeight: null,
-                                    /* paddingLeft arbitrarily acts as our proxy for the em ratio. */
-                                    paddingLeft: null
-                                },
-                                elementUnitRatios = {},
-                                /* Note: IE<=8 round to the nearest pixel when returning CSS values, thus we perform conversions using a measurement
-                                   of 10 (instead of 1) to give our ratios a precision of at least 1 decimal value. */
-                                measurement = 10;
-
-                            /* For organizational purposes, current ratio calculations are consolidated onto the elementUnitRatios object. */
-                            elementUnitRatios.remToPx = unitConversionRatios.remToPx;
-                            elementUnitRatios.vwToPx = unitConversionRatios.vwToPx;
-                            elementUnitRatios.vhToPx = unitConversionRatios.vhToPx;
-
-                            /* After temporary unit conversion logic runs, width and height properties that were originally set to "auto" must be set back
-                               to "auto" instead of to the actual corresponding pixel value. Leaving the values at their hard-coded pixel value equivalents
-                               would inherently prevent the elements from vertically adjusting as the height of its inner content changes. */
-                            /* IE tells us whether or not the property is set to "auto". Other browsers provide no way of determing "auto" values on height/width,
-                               and thus we have to trigger additional layout thrashing (see below) to solve this. */
-                            if (IE && !Data(element).isSVG) {
-                                var isIEWidthAuto = /^auto$/i.test(element.currentStyle.width),
-                                    isIEHeightAuto = /^auto$/i.test(element.currentStyle.height);
-                            }
-
-                            /* Note: To minimize layout thrashing, the ensuing unit conversion logic is split into batches to synchronize GETs and SETs. */
-                            if (!sameBasePercent || !sameBaseEm) {
-                                /* SVG elements have no concept of document flow, and don't support the full range of CSS properties,
-                                   so we skip the unnecessary stripping of unapplied properties to avoid dirtying their HTML. */
-                                if (!Data(element).isSVG) {
-                                    originalValues.overflowX = CSS.getPropertyValue(element, "overflowX"); /* GET */
-                                    originalValues.overflowY = CSS.getPropertyValue(element, "overflowY"); /* GET */
-                                    originalValues.boxSizing = CSS.getPropertyValue(element, "boxSizing"); /* GET */
-
-                                    /* Since % values are relative to their respective axes, ratios are calculated for both width and height.
-                                       In contrast, only a single ratio is required for rem and em. */
-                                    /* When calculating % values, we set a flag to indiciate that we want the computed value instead of offsetWidth/Height,
-                                       which incorporate additional dimensions (such as padding and border-width) into their values. */
-                                    originalValues.minWidth = CSS.getPropertyValue(element, "minWidth"); /* GET */
-                                    /* Note: max-width/height must default to "none" when 0 is returned, otherwise the element cannot have its width/height set. */
-                                    originalValues.maxWidth = CSS.getPropertyValue(element, "maxWidth") || "none"; /* GET */
-
-                                    originalValues.minHeight = CSS.getPropertyValue(element, "minHeight"); /* GET */
-                                    originalValues.maxHeight = CSS.getPropertyValue(element, "maxHeight") || "none"; /* GET */
-
-                                    originalValues.paddingLeft = CSS.getPropertyValue(element, "paddingLeft"); /* GET */
-                                }
-
-                                originalValues.width = CSS.getPropertyValue(element, "width", null, true); /* GET */
-                                originalValues.height = CSS.getPropertyValue(element, "height", null, true); /* GET */
-                            }
-
-                            if (sameBasePercent) {
-                                elementUnitRatios.percentToPxRatioWidth = unitConversionRatios.lastPercentToPxWidth;
-                                elementUnitRatios.percentToPxRatioHeight = unitConversionRatios.lastPercentToPxHeight;
-                            } else {
-                                if (!Data(element).isSVG) {
-                                    CSS.setPropertyValue(element, "overflowX",  "hidden"); /* SET */
-                                    CSS.setPropertyValue(element, "overflowY",  "hidden"); /* SET */
-                                    CSS.setPropertyValue(element, "boxSizing",  "content-box"); /* SET */
-
-                                    CSS.setPropertyValue(element, "minWidth", measurement + "%"); /* SET */
-                                    CSS.setPropertyValue(element, "maxWidth", measurement + "%"); /* SET */
-
-                                    CSS.setPropertyValue(element, "minHeight",  measurement + "%"); /* SET */
-                                    CSS.setPropertyValue(element, "maxHeight",  measurement + "%"); /* SET */
-                                }
-
-                                CSS.setPropertyValue(element, "width", measurement + "%"); /* SET */
-                                CSS.setPropertyValue(element, "height",  measurement + "%"); /* SET */
-                            }
-
-                            if (sameBaseEm) {
-                                elementUnitRatios.emToPx = unitConversionRatios.lastEmToPx;
-                            } else if (!Data(element).isSVG) {
-                                CSS.setPropertyValue(element, "paddingLeft", measurement + "em"); /* SET */
-                            }
-
-                            /* The following pixel-value GETs cannot be batched with the prior GETs since they depend upon the values
-                               temporarily set immediately above; layout thrashing cannot be avoided here. */
-                            if (!sameBasePercent) {
-                                /* Divide the returned value by the measurement value to get the ratio between 1% and 1px.
-                                   Default to 1 since conversion logic using 0 can produce Infinite. */
-                                elementUnitRatios.percentToPxRatioWidth = unitConversionRatios.lastPercentToPxWidth = (parseFloat(CSS.getPropertyValue(element, "width", null, true)) || 1) / measurement; /* GET */
-                                elementUnitRatios.percentToPxRatioHeight = unitConversionRatios.lastPercentToPxHeight = (parseFloat(CSS.getPropertyValue(element, "height", null, true)) || 1) / measurement; /* GET */
-                            }
-
-                            if (!sameBaseEm) {
-                                elementUnitRatios.emToPx = unitConversionRatios.lastEmToPx = (parseFloat(CSS.getPropertyValue(element, "paddingLeft")) || 1) / measurement; /* GET */
-                            }
-
-                            /* Revert each used test property to its original value. */
-                            for (var originalValueProperty in originalValues) {
-                                if (originalValues[originalValueProperty] !== null) {
-                                    CSS.setPropertyValue(element, originalValueProperty, originalValues[originalValueProperty]); /* SETs */
-                                }
-                            }
-
-                            /* SVG dimensions do not accept an "auto" value, so we skip this reset process for them. */
-                            if (!Data(element).isSVG) {
-                                /* In IE, revert to "auto" for width and height if it was originally set. */
-                                if (IE) {
-                                    if (isIEWidthAuto) {
-                                        CSS.setPropertyValue(element, "width", "auto"); /* SET */
-                                    }
-
-                                    if (isIEHeightAuto) {
-                                        CSS.setPropertyValue(element, "height", "auto"); /* SET */
-                                    }
-                                /* For other browsers, additional layout thrashing must unfortunately be triggered to determine whether a dimension property was originally "auto". */
-                                } else {
-                                    /* Set height to "auto" then compare the returned value against the element's current height value.
-                                       If they're identical, leave height set to "auto". If they're different, then "auto" wasn't originally
-                                       set on the element prior to our conversions, and we revert it to its actual value. */
-                                    /* Note: The following GETs and SETs cannot be batched together due to the cross-effect setting one axis to "auto" has on the other. */
-                                    CSS.setPropertyValue(element, "height", "auto"); /* SET */
-                                    if (originalValues.height !== CSS.getPropertyValue(element, "height", null, true)) { /* GET */
-                                        CSS.setPropertyValue(element, "height", originalValues.height); /* SET */
-                                    }
-
-                                    CSS.setPropertyValue(element, "width", "auto"); /* SET */
-                                    if (originalValues.width !== CSS.getPropertyValue(element, "width", null, true)) { /* GET */
-                                        CSS.setPropertyValue(element, "width", originalValues.width); /* SET */
-                                    }
-                                }
-                            }
-
-                            if (Velocity.debug >= 1) console.log("Unit ratios: " + JSON.stringify(elementUnitRatios), element);
-
-                            return elementUnitRatios;
-                        }
-
-                        /* The * and / operators, which are not passed in with an associated unit, inherently use startValue's unit. Skip value and unit conversion. */
-                        if (/[\/*]/.test(operator)) {
-                            endValueUnitType = startValueUnitType;
-                        /* If startValue and endValue differ in unit type, convert startValue into the same unit type as endValue so that if endValueUnitType
-                           is a relative unit (%, em, rem), the values set during tweening will continue to be accurately relative even if the metrics they depend
-                           on are dynamically changing during the course of the animation. Conversely, if we always normalized into px and used px for setting values, the px ratio
-                           would become stale if the original unit being animated toward was relative and the underlying metrics change during the animation. */
-                        /* Since 0 is 0 in any unit type, no conversion is necessary when startValue is 0 -- we just start at 0 with endValueUnitType. */
-                        } else if ((startValueUnitType !== endValueUnitType) && startValue !== 0) {
-                            /* Unit conversion is also skipped when endValue is 0, but *startValueUnitType* must be used for tween values to remain accurate. */
-                            /* Note: Skipping unit conversion here means that if endValueUnitType was originally a relative unit, the animation won't relatively
-                               match the underlying metrics if they change, but this is acceptable since we're animating toward invisibility instead of toward visibility,
-                               which remains past the point of the animation's completion. */
-                            if (endValue === 0) {
-                                endValueUnitType = startValueUnitType;
-                            } else {
-                                /* By this point, we cannot avoid unit conversion (it's undesirable since it causes layout thrashing).
-                                   If we haven't already, we trigger calculateUnitRatios(), which runs once per element per call. */
-                                elementUnitRatios = elementUnitRatios || calculateUnitRatios();
-
-                                /* The following RegEx matches CSS properties that have their % values measured relative to the x-axis. */
-                                /* Note: W3C spec mandates that all of margin and padding's properties (even top and bottom) are %-relative to the *width* of the parent element. */
-                                var axis = (/margin|padding|left|right|width|text|word|letter/i.test(property) || /X$/.test(property)) ? "x" : "y";
-
-                                /* In order to avoid generating n^2 bespoke conversion functions, unit conversion is a two-step process:
-                                   1) Convert startValue into pixels. 2) Convert this new pixel value into endValue's unit type. */
-                                switch (startValueUnitType) {
-                                    case "%":
-                                        /* Note: translateX and translateY are the only properties that are %-relative to an element's own dimensions -- not its parent's dimensions.
-                                           Velocity does not include a special conversion process to account for this behavior. Therefore, animating translateX/Y from a % value
-                                           to a non-% value will produce an incorrect start value. Fortunately, this sort of cross-unit conversion is rarely done by users in practice. */
-                                        startValue *= (axis === "x" ? elementUnitRatios.percentToPxRatioWidth : elementUnitRatios.percentToPxRatioHeight);
-                                        break;
-
-                                    case "px":
-                                        /* px acts as our midpoint in the unit conversion process; do nothing. */
-                                        break;
-
-                                    default:
-                                        startValue *= elementUnitRatios[startValueUnitType + "ToPx"];
-                                }
-
-                                /* Invert the px ratios to convert into to the target unit. */
-                                switch (endValueUnitType) {
-                                    case "%":
-                                        startValue *= 1 / (axis === "x" ? elementUnitRatios.percentToPxRatioWidth : elementUnitRatios.percentToPxRatioHeight);
-                                        break;
-
-                                    case "px":
-                                        /* startValue is already in px, do nothing; we're done. */
-                                        break;
-
-                                    default:
-                                        startValue *= 1 / elementUnitRatios[endValueUnitType + "ToPx"];
-                                }
-                            }
-                        }
-
-                        /***********************
-                            Value Operators
-                        ***********************/
-
-                        /* Operator logic must be performed last since it requires unit-normalized start and end values. */
-                        /* Note: Relative *percent values* do not behave how most people think; while one would expect "+=50%"
-                           to increase the property 1.5x its current value, it in fact increases the percent units in absolute terms:
-                           50 points is added on top of the current % value. */
-                        switch (operator) {
-                            case "+":
-                                endValue = startValue + endValue;
-                                break;
-
-                            case "-":
-                                endValue = startValue - endValue;
-                                break;
-
-                            case "*":
-                                endValue = startValue * endValue;
-                                break;
-
-                            case "/":
-                                endValue = startValue / endValue;
-                                break;
-                        }
-
-                        /**************************
-                           tweensContainer Push
-                        **************************/
-
-                        /* Construct the per-property tween object, and push it to the element's tweensContainer. */
-                        tweensContainer[property] = {
-                            rootPropertyValue: rootPropertyValue,
-                            startValue: startValue,
-                            currentValue: startValue,
-                            endValue: endValue,
-                            unitType: endValueUnitType,
-                            easing: easing
-                        };
-
-                        if (Velocity.debug) console.log("tweensContainer (" + property + "): " + JSON.stringify(tweensContainer[property]), element);
-                    }
-
-                    /* Along with its property data, store a reference to the element itself onto tweensContainer. */
-                    tweensContainer.element = element;
-                }
-
-                /*****************
-                    Call Push
-                *****************/
-
-                /* Note: tweensContainer can be empty if all of the properties in this call's property map were skipped due to not
-                   being supported by the browser. The element property is used for checking that the tweensContainer has been appended to. */
-                if (tweensContainer.element) {
-                    /* Apply the "velocity-animating" indicator class. */
-                    CSS.Values.addClass(element, "velocity-animating");
-
-                    /* The call array houses the tweensContainers for each element being animated in the current call. */
-                    call.push(tweensContainer);
-
-                    /* Store the tweensContainer on the element, plus the current call's opts so that Velocity can reference this data the next time this element is animated. */
-                    Data(element).tweensContainer = tweensContainer;
-                    Data(element).opts = opts;
-                    /* Switch on the element's animating flag. */
-                    Data(element).isAnimating = true;
-
-                    /* Once the final element in this call's element set has been processed, push the call array onto
-                       Velocity.State.calls for the animation tick to immediately begin processing. */
-                    if (elementsIndex === elementsLength - 1) {
-                        /* To speed up iterating over this array, it is compacted (falsey items -- calls that have completed -- are removed)
-                           when its length has ballooned to a point that can impact tick performance. This only becomes necessary when animation
-                           has been continuous with many elements over a long period of time; whenever all active calls are completed, completeCall() clears Velocity.State.calls. */
-                        if (Velocity.State.calls.length > 10000) {
-                            Velocity.State.calls = compactSparseArray(Velocity.State.calls);
-                        }
-
-                        /* Add the current call plus its associated metadata (the element set and the call's options) onto the global call container.
-                           Anything on this call container is subjected to tick() processing. */
-                        Velocity.State.calls.push([ call, elements, opts, null, promiseData.resolver ]);
-
-                        /* If the animation tick isn't running, start it. (Velocity shuts it off when there are no active calls to process.) */
-                        if (Velocity.State.isTicking === false) {
-                            Velocity.State.isTicking = true;
-
-                            /* Start the tick loop. */
-                            tick();
-                        }
-                    } else {
-                        elementsIndex++;
-                    }
-                }
-            }
-
-            /* When the queue option is set to false, the call skips the element's queue and fires immediately. */
-            if (opts.queue === false) {
-                /* Since this buildQueue call doesn't respect the element's existing queue (which is where a delay option would have been appended),
-                   we manually inject the delay property here with an explicit setTimeout. */
-                if (opts.delay) {
-                    setTimeout(buildQueue, opts.delay);
-                } else {
-                    buildQueue();
-                }
-            /* Otherwise, the call undergoes element queueing as normal. */
-            /* Note: To interoperate with jQuery, Velocity uses jQuery's own $.queue() stack for queuing logic. */
-            } else {
-                $.queue(element, opts.queue, function(next, clearQueue) {
-                    /* If the clearQueue flag was passed in by the stop command, resolve this call's promise. (Promises can only be resolved once,
-                       so it's fine if this is repeatedly triggered for each element in the associated call.) */
-                    if (clearQueue === true) {
-                        if (promiseData.promise) {
-                            promiseData.resolver(elements);
-                        }
-
-                        /* Do not continue with animation queueing. */
-                        return true;
-                    }
-                    
-                    /* This flag indicates to the upcoming completeCall() function that this queue entry was initiated by Velocity.
-                       See completeCall() for further details. */
-                    Velocity.velocityQueueEntryFlag = true;
-
-                    buildQueue(next);
-                });
-            }
-
-            /*********************
-                Auto-Dequeuing
-            *********************/
-
-            /* As per jQuery's $.queue() behavior, to fire the first non-custom-queue entry on an element, the element
-               must be dequeued if its queue stack consists *solely* of the current call. (This can be determined by checking
-               for the "inprogress" item that jQuery prepends to active queue stack arrays.) Regardless, whenever the element's
-               queue is further appended with additional items -- including $.delay()'s or even $.animate() calls, the queue's
-               first entry is automatically fired. This behavior contrasts that of custom queues, which never auto-fire. */
-            /* Note: When an element set is being subjected to a non-parallel Velocity call, the animation will not begin until
-               each one of the elements in the set has reached the end of its individually pre-existing queue chain. */
-            /* Note: Unfortunately, most people don't fully grasp jQuery's powerful, yet quirky, $.queue() function.
-               Lean more here: http://stackoverflow.com/questions/1058158/can-somebody-explain-jquery-queue-to-me */
-            if ((opts.queue === "" || opts.queue === "fx") && $.queue(element)[0] !== "inprogress") {
-                $.dequeue(element);
-            }
-        }
-
-        /**************************
-           Element Set Iteration
-        **************************/
-
-        /* If the "nodeType" property exists on the elements variable, we're animating a single element.
-           Place it in an array so that $.each() can iterate over it. */
-        $.each(Type.isNode(elements) ? [ elements ] : elements, function(i, element) {
-            /* Ensure each element in a set has a nodeType (is a real element) to avoid throwing errors. */
-            if (Type.isNode(element)) {
-                processElement.call(element);
-            }
-        });
-
-        /******************
-           Option: Loop
-        ******************/
-
-        /* The loop option accepts an integer indicating how many times the element should loop between the values in the
-           current call's properties map and the element's property values prior to this call. */
-        /* Note: The loop option's logic is performed here -- after element processing -- because the current call needs
-           to undergo its queue insertion prior to the loop option generating its series of constituent "reverse" calls,
-           which chain after the current call. Two reverse calls (two "alternations") constitute one loop. */
-        var opts = $.extend({}, Velocity.defaults, options),
-            reverseCallsCount;
-
-        opts.loop = parseInt(opts.loop);
-        reverseCallsCount = (opts.loop * 2) - 1;
-
-        if (opts.loop) {
-            /* Double the loop count to convert it into its appropriate number of "reverse" calls.
-               Subtract 1 from the resulting value since the current call is included in the total alternation count. */
-            for (var x = 0; x < reverseCallsCount; x++) {
-                /* Since the logic for the reverse action occurs inside Queueing and therefore this call's options object
-                   isn't parsed until then as well, the current call's delay option must be explicitly passed into the reverse
-                   call so that the delay logic that occurs inside *Pre-Queueing* can process it. */
-                var reverseOptions = {
-                    delay: opts.delay
-                };
-
-                /* If a complete callback was passed into this call, transfer it to the loop sequence's final "reverse" call
-                   so that it's triggered when the entire sequence is complete (and not when the very first animation is complete). */
-                if (opts.complete && (x === reverseCallsCount - 1)) {
-                    reverseOptions.complete = opts.complete;
-                }
-
-                Velocity.animate(elements, "reverse", reverseOptions);
-            }
-        }
-
-        /***************
-            Chaining
-        ***************/
-
-        /* Return the elements back to the call chain, with wrapped elements taking precedence in case Velocity was called via the $.fn. extension. */
-        return getChain();
-    };
-
-    /*****************************
-       Tick (Calls Processing)
-    *****************************/
-
-    /* Note: All calls to Velocity are pushed to the Velocity.State.calls array, which is fully iterated through upon each tick. */
-    function tick (timestamp) {
-        /* An empty timestamp argument indicates that this is the first tick occurence since ticking was turned on.
-           We leverage this metadata to fully ignore the first tick pass since RAF's initial pass is fired whenever
-           the browser's next tick sync time occurs, which results in the first elements subjected to Velocity
-           calls being animated out of sync with any elements animated immediately thereafter. In short, we ignore
-           the first RAF tick pass so that elements being immediately consecutively animated -- instead of simultaneously animated
-           by the same Velocity call -- are properly batched into the same initial RAF tick and consequently remain in sync thereafter. */
-        if (timestamp) {
-            /* We ignore RAF's high resolution timestamp since it can be significantly offset when the browser is
-               under high stress; we opt for choppiness over allowing the browser to drop huge chunks of frames. */
-            var timeCurrent = (new Date).getTime();
-
-            /********************
-               Call Iteration
-            ********************/
-
-            /* Iterate through each active call. */
-            for (var i = 0, callsLength = Velocity.State.calls.length; i < callsLength; i++) {
-                /* When a velocity call is completed, its Velocity.State.calls entry is set to false. Continue on to the next call. */
-                if (!Velocity.State.calls[i]) {
-                    continue;
-                }
-
-                /************************
-                   Call-Wide Variables
-                ************************/
-
-                var callContainer = Velocity.State.calls[i],
-                    call = callContainer[0],
-                    opts = callContainer[2],
-                    timeStart = callContainer[3];
-
-                /* If timeStart is undefined, then this is the first time that this call has been processed by tick().
-                   We assign timeStart now so that its value is as close to the real animation start time as possible.
-                   (Conversely, had timeStart been defined when this call was added to Velocity.State.calls, the delay
-                   between that time and now would cause the first few frames of the tween to be skipped since
-                   percentComplete is calculated relative to timeStart.) */
-                /* Further, subtract 16ms (the approximate resolution of RAF) from the current time value so that the
-                   first tick iteration isn't wasted by animating at 0% tween completion, which would produce the
-                   same style value as the element's current value. */
-                if (!timeStart) {
-                    timeStart = Velocity.State.calls[i][3] = timeCurrent - 16;
-                }
-
-                /* The tween's completion percentage is relative to the tween's start time, not the tween's start value
-                   (which would result in unpredictable tween durations since JavaScript's timers are not particularly accurate).
-                   Accordingly, we ensure that percentComplete does not exceed 1. */
-                var percentComplete = Math.min((timeCurrent - timeStart) / opts.duration, 1);
-
-                /**********************
-                   Element Iteration
-                **********************/
-
-                /* For every call, iterate through each of the elements in its set. */
-                for (var j = 0, callLength = call.length; j < callLength; j++) {
-                    var tweensContainer = call[j],
-                        element = tweensContainer.element;
-
-                    /* Check to see if this element has been deleted midway through the animation by checking for the
-                       continued existence of its data cache. If it's gone, skip animating this element. */
-                    if (!Data(element)) {
-                        continue;
-                    }
-
-                    var transformPropertyExists = false;
-
-                    /**********************************
-                       Display & Visibility Toggling
-                    **********************************/
-
-                    /* If the display option is set to non-"none", set it upfront so that the element can become visible before tweening begins.
-                       (Otherwise, display's "none" value is set in completeCall() once the animation has completed.) */
-                    if (opts.display && opts.display !== "none") {
-                        CSS.setPropertyValue(element, "display", opts.display);
-                    }
-
-                    /* Same goes with the visibility option, but its "none" equivalent is "hidden". */
-                    if (opts.visibility && opts.visibility !== "hidden") {
-                        CSS.setPropertyValue(element, "visibility", opts.visibility);
-                    }
-
-                    /************************
-                       Property Iteration
-                    ************************/
-
-                    /* For every element, iterate through each property. */
-                    for (var property in tweensContainer) {
-                        /* Note: In addition to property tween data, tweensContainer contains a reference to its associated element. */
-                        if (property !== "element") {
-                            var tween = tweensContainer[property],
-                                currentValue,
-                                /* Easing can either be a pre-genereated function or a string that references a pre-registered easing
-                                   on the Velocity.Easings object. In either case, return the appropriate easing *function*. */
-                                easing = Type.isString(tween.easing) ? Velocity.Easings[tween.easing] : tween.easing;
-
-                            /******************************
-                               Current Value Calculation
-                            ******************************/
-
-                            /* If this is the last tick pass (if we've reached 100% completion for this tween),
-                               ensure that currentValue is explicitly set to its target endValue so that it's not subjected to any rounding. */
-                            if (percentComplete === 1) {
-                                currentValue = tween.endValue;
-                            /* Otherwise, calculate currentValue based on the current delta from startValue. */
-                            } else {
-                                currentValue = tween.startValue + ((tween.endValue - tween.startValue) * easing(percentComplete));
-                            }
-
-                            tween.currentValue = currentValue;
-
-                            /******************
-                               Hooks: Part I
-                            ******************/
-
-                            /* For hooked properties, the newly-updated rootPropertyValueCache is cached onto the element so that it can be used
-                               for subsequent hooks in this call that are associated with the same root property. If we didn't cache the updated
-                               rootPropertyValue, each subsequent update to the root property in this tick pass would reset the previous hook's
-                               updates to rootPropertyValue prior to injection. A nice performance byproduct of rootPropertyValue caching is that
-                               subsequently chained animations using the same hookRoot but a different hook can use this cached rootPropertyValue. */
-                            if (CSS.Hooks.registered[property]) {
-                                var hookRoot = CSS.Hooks.getRoot(property),
-                                    rootPropertyValueCache = Data(element).rootPropertyValueCache[hookRoot];
-
-                                if (rootPropertyValueCache) {
-                                    tween.rootPropertyValue = rootPropertyValueCache;
-                                }
-                            }
-
-                            /*****************
-                                DOM Update
-                            *****************/
-
-                            /* setPropertyValue() returns an array of the property name and property value post any normalization that may have been performed. */
-                            /* Note: To solve an IE<=8 positioning bug, the unit type is dropped when setting a property value of 0. */
-                            var adjustedSetData = CSS.setPropertyValue(element, /* SET */
-                                                                       property,
-                                                                       tween.currentValue + (parseFloat(currentValue) === 0 ? "" : tween.unitType),
-                                                                       tween.rootPropertyValue,
-                                                                       tween.scrollData);
-
-                            /*******************
-                               Hooks: Part II
-                            *******************/
-
-                            /* Now that we have the hook's updated rootPropertyValue (the post-processed value provided by adjustedSetData), cache it onto the element. */
-                            if (CSS.Hooks.registered[property]) {
-                                /* Since adjustedSetData contains normalized data ready for DOM updating, the rootPropertyValue needs to be re-extracted from its normalized form. ?? */
-                                if (CSS.Normalizations.registered[hookRoot]) {
-                                    Data(element).rootPropertyValueCache[hookRoot] = CSS.Normalizations.registered[hookRoot]("extract", null, adjustedSetData[1]);
-                                } else {
-                                    Data(element).rootPropertyValueCache[hookRoot] = adjustedSetData[1];
-                                }
-                            }
-
-                            /***************
-                               Transforms
-                            ***************/
-
-                            /* Flag whether a transform property is being animated so that flushTransformCache() can be triggered once this tick pass is complete. */
-                            if (adjustedSetData[0] === "transform") {
-                                transformPropertyExists = true;
-                            }
-                        }
-                    }
-
-                    /****************
-                        mobileHA
-                    ****************/
-
-                    /* If mobileHA is enabled, set the translate3d transform to null to force hardware acceleration.
-                       It's safe to override this property since Velocity doesn't actually support its animation (hooks are used in its place). */
-                    if (opts.mobileHA) {
-                        /* Don't set the null transform hack if we've already done so. */
-                        if (Data(element).transformCache.translate3d === undefined) {
-                            /* All entries on the transformCache object are later concatenated into a single transform string via flushTransformCache(). */
-                            Data(element).transformCache.translate3d = "(0px, 0px, 0px)";
-
-                            transformPropertyExists = true;
-                        }
-                    }
-
-                    if (transformPropertyExists) {
-                        CSS.flushTransformCache(element);
-                    }
-                }
-
-                /* The non-"none" display value is only applied to an element once -- when its associated call is first ticked through.
-                   Accordingly, it's set to false so that it isn't re-processed by this call in the next tick. */
-                if (opts.display && opts.display !== "none") {
-                    Velocity.State.calls[i][2].display = false;
-                }
-
-                if (opts.visibility && opts.visibility !== "hidden") {
-                    Velocity.State.calls[i][2].visibility = false;
-                }
-
-                /* Pass the elements and the timing data (percentComplete, msRemaining, and timeStart) into the progress callback. */
-                if (opts.progress) {
-                    opts.progress.call(callContainer[1],
-                                       callContainer[1],
-                                       percentComplete,
-                                       Math.max(0, (timeStart + opts.duration) - timeCurrent),
-                                       timeStart);
-                }
-
-                /* If this call has finished tweening, pass its index to completeCall() to handle call cleanup. */
-                if (percentComplete === 1) {
-                    completeCall(i);
-                }
-            }
-        }
-
-        /* Note: completeCall() sets the isTicking flag to false when the last call on Velocity.State.calls has completed. */
-        if (Velocity.State.isTicking) {
-            rAF(tick);
-        }
-    }
-
-    /**********************
-        Call Completion
-    **********************/
-
-    /* Note: Unlike tick(), which processes all active calls at once, call completion is handled on a per-call basis. */
-    function completeCall (callIndex, isStopped) {
-        /* Ensure the call exists. */
-        if (!Velocity.State.calls[callIndex]) {
-            return false;
-        }
-
-        /* Pull the metadata from the call. */
-        var call = Velocity.State.calls[callIndex][0],
-            elements = Velocity.State.calls[callIndex][1],
-            opts = Velocity.State.calls[callIndex][2],
-            resolver = Velocity.State.calls[callIndex][4];
-
-        var remainingCallsExist = false;
-
-        /*************************
-           Element Finalization
-        *************************/
-
-        for (var i = 0, callLength = call.length; i < callLength; i++) {
-            var element = call[i].element;
-
-            /* If the user set display to "none" (intending to hide the element), set it now that the animation has completed. */
-            /* Note: display:none isn't set when calls are manually stopped (via Velocity.animate("stop"). */
-            /* Note: Display is ignored with "reverse" calls, which is what loops are composed of, since this behavior would be undesirable. */
-            if (!isStopped && !opts.loop) {
-                if (opts.display === "none") {
-                    CSS.setPropertyValue(element, "display", opts.display);
-                }
-
-                if (opts.visibility === "hidden") {
-                    CSS.setPropertyValue(element, "visibility", opts.visibility);
-                }
-            }
-
-            /* If the element's queue is empty (if only the "inprogress" item is left at position 0) or if its queue is about to run
-               a non-Velocity-initiated entry, turn off the isAnimating flag. A non-Velocity-initiatied queue entry's logic might alter
-               an element's CSS values and thereby cause Velocity's cached value data to go stale. To detect if a queue entry was initiated by Velocity,
-               we check for the existence of our special Velocity.queueEntryFlag declaration, which minifiers won't rename since the flag
-               is assigned to jQuery's global $ object and thus exists out of Velocity's own scope. */
-            if ($.queue(element)[1] === undefined || !/\.velocityQueueEntryFlag/i.test($.queue(element)[1])) {
-                /* The element may have been deleted. Ensure that its data cache still exists before acting on it. */
-                if (Data(element)) {
-                    Data(element).isAnimating = false;
-                    /* Clear the element's rootPropertyValueCache, which will become stale. */
-                    Data(element).rootPropertyValueCache = {};
-
-                    var transformHAPropertyExists = false;
-                    /* If any transform subproperty is at its default value (regardless of unit type), remove it. This has the
-                       dual benefit of avoiding random browser transform bugs and removing hardware acceleration to free up RAM. */
-                    $.each(Data(element).transformCache, function(transformName, transformValue) {
-                        var defaultValue = /^scale/.test(transformName) ? 1 : 0;
-
-                        if (new RegExp("^\\(" + defaultValue + "[^.]").test(transformValue)) {
-                            transformHAPropertyExists = true;
-                            delete Data(element).transformCache[transformName];
-                        }
-                    });
-
-                    /* Mobile devices have hardware acceleration removed at the end of the animation in order to avoid hogging the GPU's memory. */
-                    if (opts.mobileHA) {
-                        transformHAPropertyExists = true;
-                        delete Data(element).transformCache.translate3d;
-                    }
-
-                    /* Flush the subproperty removals to the DOM. */
-                    if (transformHAPropertyExists) {
-                        CSS.flushTransformCache(element);
-                    }
-
-                    /* Remove the "velocity-animating" indicator class. */
-                    CSS.Values.removeClass(element, "velocity-animating");
-                }
-            }
-
-            /*********************
-               Option: Complete
-            *********************/
-
-            /* Complete is fired once per call (not once per element) and is passed the full raw DOM element set as both its context and its first argument. */
-            /* Note: Callbacks aren't fired when calls are manually stopped (via Velocity.animate("stop"). */
-            /* Note: If this is a loop, complete callback firing is only triggered on the loop's final reverse call. */
-            if (!isStopped && opts.complete && !opts.loop && (i === callLength - 1)) {
-                /* We throw callbacks in a setTimeout so that thrown errors don't halt the execution of Velocity itself. */
-                try {
-                    opts.complete.call(elements, elements);
-                } catch (error) { 
-                    setTimeout(function() {
-                        throw error;
-                    }, 1);
-                }
-            }
-
-            /**********************
-               Promise Resolving
-            **********************/
-
-            if (resolver) {
-                resolver(elements);
-            }
-
-            /***************
-               Dequeueing
-            ***************/
-
-            /* Fire the next call in the queue so long as this call's queue wasn't set to false (to trigger a parallel animation),
-               which would have already caused the next call to fire. Note: Even if the end of the animation queue has been reached,
-               $.dequeue() must still be called in order to completely clear jQuery's animation queue. */
-            if (opts.queue !== false) {
-                $.dequeue(element, opts.queue);
-            }
-        }
-
-        /************************
-           Calls Array Cleanup
-        ************************/
-
-        /* Since this call is complete, set it to false so that the rAF tick skips it. This array is later compacted via compactSparseArray().
-          (For performance reasons, the call is set to false instead of being deleted from the array: http://www.html5rocks.com/en/tutorials/speed/v8/) */
-        Velocity.State.calls[callIndex] = false;
-
-        /* Iterate through the calls array to determine if this was the final in-progress animation.
-           If so, set a flag to end ticking and clear the calls array. */
-        for (var j = 0, callsLength = Velocity.State.calls.length; j < callsLength; j++) {
-            if (Velocity.State.calls[j] !== false) {
-                remainingCallsExist = true;
-
-                break;
-            }
-        }
-
-        if (remainingCallsExist === false) {
-            /* tick() will detect this flag upon its next iteration and subsequently turn itself off. */
-            Velocity.State.isTicking = false;
-
-            /* Clear the calls array so that its length is reset. */
-            delete Velocity.State.calls;
-            Velocity.State.calls = [];
-        }
-    }
-
-    /*******************
-        Installation
-    *******************/
-
-    /* Both jQuery and Zepto allow their $.fn object to be extended to allow wrapped elements to be subjected to plugin calls.
-       If either framework is loaded, register a "velocity" extension pointing to Velocity's core animate() method. */
-    var framework = window.jQuery || window.Zepto;
-
-    if (framework) {
-        /* Assign the object function to Velocity's animate() method. */
-        framework.fn.velocity = Velocity.animate;
-
-        /* Assign the object function's defaults to Velocity's global defaults object. */
-        framework.fn.velocity.defaults = Velocity.defaults;
-    }
-
-    /* Support for AMD and CommonJS module loaders. */
-    if (typeof define !== "undefined" && define.amd) {
-        define(function() { return Velocity; });
-    } else if (typeof module !== "undefined" && module.exports) {
-        module.exports = Velocity;
-    }
-
-    /***********************
-       Packaged Sequences
-    ***********************/
-
-    /* slideUp, slideDown */
-    $.each([ "Down", "Up" ], function(i, direction) {
-        Velocity.Sequences["slide" + direction] = function (element, options) {
-            var opts = $.extend({}, options),
-                originalValues = {
-                    height: null,
-                    marginTop: null,
-                    marginBottom: null,
-                    paddingTop: null,
-                    paddingBottom: null,
-                    overflow: null,
-                    overflowX: null,
-                    overflowY: null
-                },
-                /* Since the slide functions make use of the begin and complete callbacks, the user's custom callbacks are stored
-                   upfront for triggering once slideDown/Up's own callback logic is complete. */
-                begin = opts.begin,
-                complete = opts.complete,
-                isHeightAuto = false;
-
-            /* Allow the user to set display to null to bypass display toggling. */
-            if (opts.display !== null) {
-                /* Unless the user is overriding the display value, show the element before slideDown begins and hide the element after slideUp completes. */
-                if (direction === "Down") {
-                    /* All sliding elements are set to the "block" display value (as opposed to an element-appropriate block/inline distinction)
-                       because inline elements cannot actually have their dimensions modified. */
-                    opts.display = opts.display || "auto";
-                } else {
-                    opts.display = opts.display || "none";
-                }
-            }
-
-            /* Begin callback. */
-            opts.begin = function () {
-                /* Check for height: "auto" so we can revert back to it when the sliding animation is complete. */
-                function checkHeightAuto() {
-                    originalValues.height = parseFloat(Velocity.CSS.getPropertyValue(element, "height"));
-
-                    /* Determine if height was originally "auto" by checking if the computed "auto" value is identical to the original value. */
-                    element.style.height = "auto";
-                    if (parseFloat(Velocity.CSS.getPropertyValue(element, "height")) === originalValues.height) {
-                        isHeightAuto = true;
-                    }
-
-                    /* Revert to the computed value before sliding begins to prevent vertical popping due to scrollbars. */
-                    Velocity.CSS.setPropertyValue(element, "height", originalValues.height + "px");
-                }
-
-                if (direction === "Down") {
-                    originalValues.overflow = [ Velocity.CSS.getPropertyValue(element, "overflow"), 0 ];
-                    originalValues.overflowX = [ Velocity.CSS.getPropertyValue(element, "overflowX"), 0 ];
-                    originalValues.overflowY = [ Velocity.CSS.getPropertyValue(element, "overflowY"), 0 ];
-
-                    /* Ensure the element is visible, and temporarily remove vertical scrollbars since animating them is visually unappealing. */
-                    element.style.overflow = "hidden";
-                    element.style.overflowX = "visible";
-                    element.style.overflowY = "hidden";
-
-                    /* With the scrollars no longer affecting sizing, determine whether the element is currently height: "auto". */
-                    checkHeightAuto();
-
-                    /* Cache the elements' original vertical dimensional values so that we can animate back to them. */
-                    for (var property in originalValues) {
-                        /* Overflow values have already been cached; do not overwrite them with "hidden". */
-                        if (/^overflow/.test(property)) {
-                            continue;
-                        }
-
-                        var propertyValue = Velocity.CSS.getPropertyValue(element, property);
-
-                        if (property === "height") {
-                            propertyValue = parseFloat(propertyValue);
-                        }
-
-                        /* Use forcefeeding to animate slideDown properties from 0. */
-                        originalValues[property] = [ propertyValue, 0 ];
-                    }
-                } else {
-                    checkHeightAuto();
-
-                    for (var property in originalValues) {
-                        var propertyValue = Velocity.CSS.getPropertyValue(element, property);
-
-                        if (property === "height") {
-                            propertyValue = parseFloat(propertyValue);
-                        }
-
-                        /* Use forcefeeding to animate slideUp properties toward 0. */
-                        originalValues[property] = [ 0, propertyValue ];
-                    }
-
-                    /* Both directions hide scrollbars since scrollbar height tweening looks unappealing. */
-                    element.style.overflow = "hidden";
-                    element.style.overflowX = "visible";
-                    element.style.overflowY = "hidden";
-                }
-
-                /* If the user passed in a begin callback, fire it now. */
-                if (begin) {
-                    begin.call(element, element);
-                }
-            }
-
-            /* Complete callback. */
-            opts.complete = function (element) {
-                var propertyValuePosition = (direction === "Down") ? 0 : 1;
-
-                if (isHeightAuto === true) {
-                    /* If the element's height was originally set to auto, overwrite the computed value with "auto". */
-                    originalValues.height[propertyValuePosition] = "auto";
-                } else {
-                    originalValues.height[propertyValuePosition] += "px";
-                }
-
-                /* Reset element to its original values once its slide animation is complete: For slideDown, overflow
-                   values are reset. For slideUp, all values are reset (since they were animated to 0).) */
-                for (var property in originalValues) {
-                    element.style[property] = originalValues[property][propertyValuePosition];
-                }
-
-                /* If the user passed in a complete callback, fire it now. */
-                if (complete) {
-                    complete.call(element, element);
-                }
-            };
-
-            /* Animation triggering. */
-            Velocity.animate(element, originalValues, opts);
-        };
-    });
-
-    /* fadeIn, fadeOut */
-    $.each([ "In", "Out" ], function(i, direction) {
-        Velocity.Sequences["fade" + direction] = function (element, options, elementsIndex, elementsSize) {
-            var opts = $.extend({}, options),
-                propertiesMap = {
-                    opacity: (direction === "In") ? 1 : 0
-                };
-
-            /* Since sequences are triggered individually for each element in the animated set, avoid repeatedly triggering
-               callbacks by firing them only when the final element has been reached. */
-            if (elementsIndex !== elementsSize - 1) {
-                opts.complete = opts.begin = null;
-            }
-
-            /* If a display was passed in, use it. Otherwise, default to "none" for fadeOut or the element-specific default for fadeIn. */
-            /* Note: We allow users to pass in "null" to skip display setting altogether. */
-            if (opts.display !== null) {
-                opts.display = opts.display || ((direction === "In") ? "auto" : "none");
-            }
-
-            Velocity.animate(this, propertiesMap, opts);
-        };
-    });
-})((window.jQuery || window.Zepto || window), window, document);
-
-/******************
-   Known Issues
-******************/
-
-/* When animating height/width to a % value on an element *without* box-sizing:border-box and *with* visible scrollbars
-   on *both* axes, the opposite axis (e.g. height vs width) will be shortened by the height/width of its scrollbar. */
-
-/* The CSS spec mandates that the translateX/Y/Z transforms are %-relative to the element itself -- not its parent.
-   Velocity, however, doesn't make this distinction. Thus, converting to or from the % unit with these subproperties
-   will produce an inaccurate conversion value. The same issue exists with the cx/cy attributes of SVG circles and ellipses. */
-;/* ========================================================================
- * Bootstrap: affix.js v3.2.0
- * http://getbootstrap.com/javascript/#affix
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // AFFIX CLASS DEFINITION
-  // ======================
-
-  var Affix = function (element, options) {
-    this.options = $.extend({}, Affix.DEFAULTS, options)
-
-    this.$target = $(this.options.target)
-      .on('scroll.bs.affix.data-api', $.proxy(this.checkPosition, this))
-      .on('click.bs.affix.data-api',  $.proxy(this.checkPositionWithEventLoop, this))
-
-    this.$element     = $(element)
-    this.affixed      =
-    this.unpin        =
-    this.pinnedOffset = null
-
-    this.checkPosition()
-  }
-
-  Affix.VERSION  = '3.2.0'
-
-  Affix.RESET    = 'affix affix-top affix-bottom'
-
-  Affix.DEFAULTS = {
-    offset: 0,
-    target: window
-  }
-
-  Affix.prototype.getPinnedOffset = function () {
-    if (this.pinnedOffset) return this.pinnedOffset
-    this.$element.removeClass(Affix.RESET).addClass('affix')
-    var scrollTop = this.$target.scrollTop()
-    var position  = this.$element.offset()
-    return (this.pinnedOffset = position.top - scrollTop)
-  }
-
-  Affix.prototype.checkPositionWithEventLoop = function () {
-    setTimeout($.proxy(this.checkPosition, this), 1)
-  }
-
-  Affix.prototype.checkPosition = function () {
-    if (!this.$element.is(':visible')) return
-
-    var scrollHeight = $(document).height()
-    var scrollTop    = this.$target.scrollTop()
-    var position     = this.$element.offset()
-    var offset       = this.options.offset
-    var offsetTop    = offset.top
-    var offsetBottom = offset.bottom
-
-    if (typeof offset != 'object')         offsetBottom = offsetTop = offset
-    if (typeof offsetTop == 'function')    offsetTop    = offset.top(this.$element)
-    if (typeof offsetBottom == 'function') offsetBottom = offset.bottom(this.$element)
-
-    var affix = this.unpin   != null && (scrollTop + this.unpin <= position.top) ? false :
-                offsetBottom != null && (position.top + this.$element.height() >= scrollHeight - offsetBottom) ? 'bottom' :
-                offsetTop    != null && (scrollTop <= offsetTop) ? 'top' : false
-
-    if (this.affixed === affix) return
-    if (this.unpin != null) this.$element.css('top', '')
-
-    var affixType = 'affix' + (affix ? '-' + affix : '')
-    var e         = $.Event(affixType + '.bs.affix')
-
-    this.$element.trigger(e)
-
-    if (e.isDefaultPrevented()) return
-
-    this.affixed = affix
-    this.unpin = affix == 'bottom' ? this.getPinnedOffset() : null
-
-    this.$element
-      .removeClass(Affix.RESET)
-      .addClass(affixType)
-      .trigger($.Event(affixType.replace('affix', 'affixed')))
-
-    if (affix == 'bottom') {
-      this.$element.offset({
-        top: scrollHeight - this.$element.height() - offsetBottom
-      })
-    }
-  }
-
-
-  // AFFIX PLUGIN DEFINITION
-  // =======================
-
-  function Plugin(option) {
-    return this.each(function () {
-      var $this   = $(this)
-      var data    = $this.data('bs.affix')
-      var options = typeof option == 'object' && option
-
-      if (!data) $this.data('bs.affix', (data = new Affix(this, options)))
-      if (typeof option == 'string') data[option]()
-    })
-  }
-
-  var old = $.fn.affix
-
-  $.fn.affix             = Plugin
-  $.fn.affix.Constructor = Affix
-
-
-  // AFFIX NO CONFLICT
-  // =================
-
-  $.fn.affix.noConflict = function () {
-    $.fn.affix = old
-    return this
-  }
-
-
-  // AFFIX DATA-API
-  // ==============
-
-  $(window).on('load', function () {
-    $('[data-spy="affix"]').each(function () {
-      var $spy = $(this)
-      var data = $spy.data()
-
-      data.offset = data.offset || {}
-
-      if (data.offsetBottom) data.offset.bottom = data.offsetBottom
-      if (data.offsetTop)    data.offset.top    = data.offsetTop
-
-      Plugin.call($spy, data)
-    })
-  })
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: alert.js v3.2.0
- * http://getbootstrap.com/javascript/#alerts
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // ALERT CLASS DEFINITION
-  // ======================
-
-  var dismiss = '[data-dismiss="alert"]'
-  var Alert   = function (el) {
-    $(el).on('click', dismiss, this.close)
-  }
-
-  Alert.VERSION = '3.2.0'
-
-  Alert.prototype.close = function (e) {
-    var $this    = $(this)
-    var selector = $this.attr('data-target')
-
-    if (!selector) {
-      selector = $this.attr('href')
-      selector = selector && selector.replace(/.*(?=#[^\s]*$)/, '') // strip for ie7
-    }
-
-    var $parent = $(selector)
-
-    if (e) e.preventDefault()
-
-    if (!$parent.length) {
-      $parent = $this.hasClass('alert') ? $this : $this.parent()
-    }
-
-    $parent.trigger(e = $.Event('close.bs.alert'))
-
-    if (e.isDefaultPrevented()) return
-
-    $parent.removeClass('in')
-
-    function removeElement() {
-      // detach from parent, fire event then clean up data
-      $parent.detach().trigger('closed.bs.alert').remove()
-    }
-
-    $.support.transition && $parent.hasClass('fade') ?
-      $parent
-        .one('bsTransitionEnd', removeElement)
-        .emulateTransitionEnd(150) :
-      removeElement()
-  }
-
-
-  // ALERT PLUGIN DEFINITION
-  // =======================
-
-  function Plugin(option) {
-    return this.each(function () {
-      var $this = $(this)
-      var data  = $this.data('bs.alert')
-
-      if (!data) $this.data('bs.alert', (data = new Alert(this)))
-      if (typeof option == 'string') data[option].call($this)
-    })
-  }
-
-  var old = $.fn.alert
-
-  $.fn.alert             = Plugin
-  $.fn.alert.Constructor = Alert
-
-
-  // ALERT NO CONFLICT
-  // =================
-
-  $.fn.alert.noConflict = function () {
-    $.fn.alert = old
-    return this
-  }
-
-
-  // ALERT DATA-API
-  // ==============
-
-  $(document).on('click.bs.alert.data-api', dismiss, Alert.prototype.close)
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: button.js v3.2.0
- * http://getbootstrap.com/javascript/#buttons
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // BUTTON PUBLIC CLASS DEFINITION
-  // ==============================
-
-  var Button = function (element, options) {
-    this.$element  = $(element)
-    this.options   = $.extend({}, Button.DEFAULTS, options)
-    this.isLoading = false
-  }
-
-  Button.VERSION  = '3.2.0'
-
-  Button.DEFAULTS = {
-    loadingText: 'loading...'
-  }
-
-  Button.prototype.setState = function (state) {
-    var d    = 'disabled'
-    var $el  = this.$element
-    var val  = $el.is('input') ? 'val' : 'html'
-    var data = $el.data()
-
-    state = state + 'Text'
-
-    if (data.resetText == null) $el.data('resetText', $el[val]())
-
-    $el[val](data[state] == null ? this.options[state] : data[state])
-
-    // push to event loop to allow forms to submit
-    setTimeout($.proxy(function () {
-      if (state == 'loadingText') {
-        this.isLoading = true
-        $el.addClass(d).attr(d, d)
-      } else if (this.isLoading) {
-        this.isLoading = false
-        $el.removeClass(d).removeAttr(d)
-      }
-    }, this), 0)
-  }
-
-  Button.prototype.toggle = function () {
-    var changed = true
-    var $parent = this.$element.closest('[data-toggle="buttons"]')
-
-    if ($parent.length) {
-      var $input = this.$element.find('input')
-      if ($input.prop('type') == 'radio') {
-        if ($input.prop('checked') && this.$element.hasClass('active')) changed = false
-        else $parent.find('.active').removeClass('active')
-      }
-      if (changed) $input.prop('checked', !this.$element.hasClass('active')).trigger('change')
-    }
-
-    if (changed) this.$element.toggleClass('active')
-  }
-
-
-  // BUTTON PLUGIN DEFINITION
-  // ========================
-
-  function Plugin(option) {
-    return this.each(function () {
-      var $this   = $(this)
-      var data    = $this.data('bs.button')
-      var options = typeof option == 'object' && option
-
-      if (!data) $this.data('bs.button', (data = new Button(this, options)))
-
-      if (option == 'toggle') data.toggle()
-      else if (option) data.setState(option)
-    })
-  }
-
-  var old = $.fn.button
-
-  $.fn.button             = Plugin
-  $.fn.button.Constructor = Button
-
-
-  // BUTTON NO CONFLICT
-  // ==================
-
-  $.fn.button.noConflict = function () {
-    $.fn.button = old
-    return this
-  }
-
-
-  // BUTTON DATA-API
-  // ===============
-
-  $(document).on('click.bs.button.data-api', '[data-toggle^="button"]', function (e) {
-    var $btn = $(e.target)
-    if (!$btn.hasClass('btn')) $btn = $btn.closest('.btn')
-    Plugin.call($btn, 'toggle')
-    e.preventDefault()
-  })
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: carousel.js v3.2.0
- * http://getbootstrap.com/javascript/#carousel
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // CAROUSEL CLASS DEFINITION
-  // =========================
-
-  var Carousel = function (element, options) {
-    this.$element    = $(element).on('keydown.bs.carousel', $.proxy(this.keydown, this))
-    this.$indicators = this.$element.find('.carousel-indicators')
-    this.options     = options
-    this.paused      =
-    this.sliding     =
-    this.interval    =
-    this.$active     =
-    this.$items      = null
-
-    this.options.pause == 'hover' && this.$element
-      .on('mouseenter.bs.carousel', $.proxy(this.pause, this))
-      .on('mouseleave.bs.carousel', $.proxy(this.cycle, this))
-  }
-
-  Carousel.VERSION  = '3.2.0'
-
-  Carousel.DEFAULTS = {
-    interval: 5000,
-    pause: 'hover',
-    wrap: true
-  }
-
-  Carousel.prototype.keydown = function (e) {
-    switch (e.which) {
-      case 37: this.prev(); break
-      case 39: this.next(); break
-      default: return
-    }
-
-    e.preventDefault()
-  }
-
-  Carousel.prototype.cycle = function (e) {
-    e || (this.paused = false)
-
-    this.interval && clearInterval(this.interval)
-
-    this.options.interval
-      && !this.paused
-      && (this.interval = setInterval($.proxy(this.next, this), this.options.interval))
-
-    return this
-  }
-
-  Carousel.prototype.getItemIndex = function (item) {
-    this.$items = item.parent().children('.item')
-    return this.$items.index(item || this.$active)
-  }
-
-  Carousel.prototype.to = function (pos) {
-    var that        = this
-    var activeIndex = this.getItemIndex(this.$active = this.$element.find('.item.active'))
-
-    if (pos > (this.$items.length - 1) || pos < 0) return
-
-    if (this.sliding)       return this.$element.one('slid.bs.carousel', function () { that.to(pos) }) // yes, "slid"
-    if (activeIndex == pos) return this.pause().cycle()
-
-    return this.slide(pos > activeIndex ? 'next' : 'prev', $(this.$items[pos]))
-  }
-
-  Carousel.prototype.pause = function (e) {
-    e || (this.paused = true)
-
-    if (this.$element.find('.next, .prev').length && $.support.transition) {
-      this.$element.trigger($.support.transition.end)
-      this.cycle(true)
-    }
-
-    this.interval = clearInterval(this.interval)
-
-    return this
-  }
-
-  Carousel.prototype.next = function () {
-    if (this.sliding) return
-    return this.slide('next')
-  }
-
-  Carousel.prototype.prev = function () {
-    if (this.sliding) return
-    return this.slide('prev')
-  }
-
-  Carousel.prototype.slide = function (type, next) {
-    var $active   = this.$element.find('.item.active')
-    var $next     = next || $active[type]()
-    var isCycling = this.interval
-    var direction = type == 'next' ? 'left' : 'right'
-    var fallback  = type == 'next' ? 'first' : 'last'
-    var that      = this
-
-    if (!$next.length) {
-      if (!this.options.wrap) return
-      $next = this.$element.find('.item')[fallback]()
-    }
-
-    if ($next.hasClass('active')) return (this.sliding = false)
-
-    var relatedTarget = $next[0]
-    var slideEvent = $.Event('slide.bs.carousel', {
-      relatedTarget: relatedTarget,
-      direction: direction
-    })
-    this.$element.trigger(slideEvent)
-    if (slideEvent.isDefaultPrevented()) return
-
-    this.sliding = true
-
-    isCycling && this.pause()
-
-    if (this.$indicators.length) {
-      this.$indicators.find('.active').removeClass('active')
-      var $nextIndicator = $(this.$indicators.children()[this.getItemIndex($next)])
-      $nextIndicator && $nextIndicator.addClass('active')
-    }
-
-    var slidEvent = $.Event('slid.bs.carousel', { relatedTarget: relatedTarget, direction: direction }) // yes, "slid"
-    if ($.support.transition && this.$element.hasClass('slide')) {
-      $next.addClass(type)
-      $next[0].offsetWidth // force reflow
-      $active.addClass(direction)
-      $next.addClass(direction)
-      $active
-        .one('bsTransitionEnd', function () {
-          $next.removeClass([type, direction].join(' ')).addClass('active')
-          $active.removeClass(['active', direction].join(' '))
-          that.sliding = false
-          setTimeout(function () {
-            that.$element.trigger(slidEvent)
-          }, 0)
-        })
-        .emulateTransitionEnd($active.css('transition-duration').slice(0, -1) * 1000)
-    } else {
-      $active.removeClass('active')
-      $next.addClass('active')
-      this.sliding = false
-      this.$element.trigger(slidEvent)
-    }
-
-    isCycling && this.cycle()
-
-    return this
-  }
-
-
-  // CAROUSEL PLUGIN DEFINITION
-  // ==========================
-
-  function Plugin(option) {
-    return this.each(function () {
-      var $this   = $(this)
-      var data    = $this.data('bs.carousel')
-      var options = $.extend({}, Carousel.DEFAULTS, $this.data(), typeof option == 'object' && option)
-      var action  = typeof option == 'string' ? option : options.slide
-
-      if (!data) $this.data('bs.carousel', (data = new Carousel(this, options)))
-      if (typeof option == 'number') data.to(option)
-      else if (action) data[action]()
-      else if (options.interval) data.pause().cycle()
-    })
-  }
-
-  var old = $.fn.carousel
-
-  $.fn.carousel             = Plugin
-  $.fn.carousel.Constructor = Carousel
-
-
-  // CAROUSEL NO CONFLICT
-  // ====================
-
-  $.fn.carousel.noConflict = function () {
-    $.fn.carousel = old
-    return this
-  }
-
-
-  // CAROUSEL DATA-API
-  // =================
-
-  $(document).on('click.bs.carousel.data-api', '[data-slide], [data-slide-to]', function (e) {
-    var href
-    var $this   = $(this)
-    var $target = $($this.attr('data-target') || (href = $this.attr('href')) && href.replace(/.*(?=#[^\s]+$)/, '')) // strip for ie7
-    if (!$target.hasClass('carousel')) return
-    var options = $.extend({}, $target.data(), $this.data())
-    var slideIndex = $this.attr('data-slide-to')
-    if (slideIndex) options.interval = false
-
-    Plugin.call($target, options)
-
-    if (slideIndex) {
-      $target.data('bs.carousel').to(slideIndex)
-    }
-
-    e.preventDefault()
-  })
-
-  $(window).on('load', function () {
-    $('[data-ride="carousel"]').each(function () {
-      var $carousel = $(this)
-      Plugin.call($carousel, $carousel.data())
-    })
-  })
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: collapse.js v3.2.0
- * http://getbootstrap.com/javascript/#collapse
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // COLLAPSE PUBLIC CLASS DEFINITION
-  // ================================
-
-  var Collapse = function (element, options) {
-    this.$element      = $(element)
-    this.options       = $.extend({}, Collapse.DEFAULTS, options)
-    this.transitioning = null
-
-    if (this.options.parent) this.$parent = $(this.options.parent)
-    if (this.options.toggle) this.toggle()
-  }
-
-  Collapse.VERSION  = '3.2.0'
-
-  Collapse.DEFAULTS = {
-    toggle: true
-  }
-
-  Collapse.prototype.dimension = function () {
-    var hasWidth = this.$element.hasClass('width')
-    return hasWidth ? 'width' : 'height'
-  }
-
-  Collapse.prototype.show = function () {
-    if (this.transitioning || this.$element.hasClass('in')) return
-
-    var startEvent = $.Event('show.bs.collapse')
-    this.$element.trigger(startEvent)
-    if (startEvent.isDefaultPrevented()) return
-
-    var actives = this.$parent && this.$parent.find('> .panel > .in')
-
-    if (actives && actives.length) {
-      var hasData = actives.data('bs.collapse')
-      if (hasData && hasData.transitioning) return
-      Plugin.call(actives, 'hide')
-      hasData || actives.data('bs.collapse', null)
-    }
-
-    var dimension = this.dimension()
-
-    this.$element
-      .removeClass('collapse')
-      .addClass('collapsing')[dimension](0)
-
-    this.transitioning = 1
-
-    var complete = function () {
-      this.$element
-        .removeClass('collapsing')
-        .addClass('collapse in')[dimension]('')
-      this.transitioning = 0
-      this.$element
-        .trigger('shown.bs.collapse')
-    }
-
-    if (!$.support.transition) return complete.call(this)
-
-    var scrollSize = $.camelCase(['scroll', dimension].join('-'))
-
-    this.$element
-      .one('bsTransitionEnd', $.proxy(complete, this))
-      .emulateTransitionEnd(350)[dimension](this.$element[0][scrollSize])
-  }
-
-  Collapse.prototype.hide = function () {
-    if (this.transitioning || !this.$element.hasClass('in')) return
-
-    var startEvent = $.Event('hide.bs.collapse')
-    this.$element.trigger(startEvent)
-    if (startEvent.isDefaultPrevented()) return
-
-    var dimension = this.dimension()
-
-    this.$element[dimension](this.$element[dimension]())[0].offsetHeight
-
-    this.$element
-      .addClass('collapsing')
-      .removeClass('collapse')
-      .removeClass('in')
-
-    this.transitioning = 1
-
-    var complete = function () {
-      this.transitioning = 0
-      this.$element
-        .trigger('hidden.bs.collapse')
-        .removeClass('collapsing')
-        .addClass('collapse')
-    }
-
-    if (!$.support.transition) return complete.call(this)
-
-    this.$element
-      [dimension](0)
-      .one('bsTransitionEnd', $.proxy(complete, this))
-      .emulateTransitionEnd(350)
-  }
-
-  Collapse.prototype.toggle = function () {
-    this[this.$element.hasClass('in') ? 'hide' : 'show']()
-  }
-
-
-  // COLLAPSE PLUGIN DEFINITION
-  // ==========================
-
-  function Plugin(option) {
-    return this.each(function () {
-      var $this   = $(this)
-      var data    = $this.data('bs.collapse')
-      var options = $.extend({}, Collapse.DEFAULTS, $this.data(), typeof option == 'object' && option)
-
-      if (!data && options.toggle && option == 'show') option = !option
-      if (!data) $this.data('bs.collapse', (data = new Collapse(this, options)))
-      if (typeof option == 'string') data[option]()
-    })
-  }
-
-  var old = $.fn.collapse
-
-  $.fn.collapse             = Plugin
-  $.fn.collapse.Constructor = Collapse
-
-
-  // COLLAPSE NO CONFLICT
-  // ====================
-
-  $.fn.collapse.noConflict = function () {
-    $.fn.collapse = old
-    return this
-  }
-
-
-  // COLLAPSE DATA-API
-  // =================
-
-  $(document).on('click.bs.collapse.data-api', '[data-toggle="collapse"]', function (e) {
-    var href
-    var $this   = $(this)
-    var target  = $this.attr('data-target')
-        || e.preventDefault()
-        || (href = $this.attr('href')) && href.replace(/.*(?=#[^\s]+$)/, '') // strip for ie7
-    var $target = $(target)
-    var data    = $target.data('bs.collapse')
-    var option  = data ? 'toggle' : $this.data()
-    var parent  = $this.attr('data-parent')
-    var $parent = parent && $(parent)
-
-    if (!data || !data.transitioning) {
-      if ($parent) $parent.find('[data-toggle="collapse"][data-parent="' + parent + '"]').not($this).addClass('collapsed')
-      $this[$target.hasClass('in') ? 'addClass' : 'removeClass']('collapsed')
-    }
-
-    Plugin.call($target, option)
-  })
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: dropdown.js v3.2.0
- * http://getbootstrap.com/javascript/#dropdowns
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // DROPDOWN CLASS DEFINITION
-  // =========================
-
-  var backdrop = '.dropdown-backdrop'
-  var toggle   = '[data-toggle="dropdown"]'
-  var Dropdown = function (element) {
-    $(element).on('click.bs.dropdown', this.toggle)
-  }
-
-  Dropdown.VERSION = '3.2.0'
-
-  Dropdown.prototype.toggle = function (e) {
-    var $this = $(this)
-
-    if ($this.is('.disabled, :disabled')) return
-
-    var $parent  = getParent($this)
-    var isActive = $parent.hasClass('open')
-
-    clearMenus()
-
-    if (!isActive) {
-      if ('ontouchstart' in document.documentElement && !$parent.closest('.navbar-nav').length) {
-        // if mobile we use a backdrop because click events don't delegate
-        $('<div class="dropdown-backdrop"/>').insertAfter($(this)).on('click', clearMenus)
-      }
-
-      var relatedTarget = { relatedTarget: this }
-      $parent.trigger(e = $.Event('show.bs.dropdown', relatedTarget))
-
-      if (e.isDefaultPrevented()) return
-
-      $this.trigger('focus')
-
-      $parent
-        .toggleClass('open')
-        .trigger('shown.bs.dropdown', relatedTarget)
-    }
-
-    return false
-  }
-
-  Dropdown.prototype.keydown = function (e) {
-    if (!/(38|40|27)/.test(e.keyCode)) return
-
-    var $this = $(this)
-
-    e.preventDefault()
-    e.stopPropagation()
-
-    if ($this.is('.disabled, :disabled')) return
-
-    var $parent  = getParent($this)
-    var isActive = $parent.hasClass('open')
-
-    if (!isActive || (isActive && e.keyCode == 27)) {
-      if (e.which == 27) $parent.find(toggle).trigger('focus')
-      return $this.trigger('click')
-    }
-
-    var desc = ' li:not(.divider):visible a'
-    var $items = $parent.find('[role="menu"]' + desc + ', [role="listbox"]' + desc)
-
-    if (!$items.length) return
-
-    var index = $items.index($items.filter(':focus'))
-
-    if (e.keyCode == 38 && index > 0)                 index--                        // up
-    if (e.keyCode == 40 && index < $items.length - 1) index++                        // down
-    if (!~index)                                      index = 0
-
-    $items.eq(index).trigger('focus')
-  }
-
-  function clearMenus(e) {
-    if (e && e.which === 3) return
-    $(backdrop).remove()
-    $(toggle).each(function () {
-      var $parent = getParent($(this))
-      var relatedTarget = { relatedTarget: this }
-      if (!$parent.hasClass('open')) return
-      $parent.trigger(e = $.Event('hide.bs.dropdown', relatedTarget))
-      if (e.isDefaultPrevented()) return
-      $parent.removeClass('open').trigger('hidden.bs.dropdown', relatedTarget)
-    })
-  }
-
-  function getParent($this) {
-    var selector = $this.attr('data-target')
-
-    if (!selector) {
-      selector = $this.attr('href')
-      selector = selector && /#[A-Za-z]/.test(selector) && selector.replace(/.*(?=#[^\s]*$)/, '') // strip for ie7
-    }
-
-    var $parent = selector && $(selector)
-
-    return $parent && $parent.length ? $parent : $this.parent()
-  }
-
-
-  // DROPDOWN PLUGIN DEFINITION
-  // ==========================
-
-  function Plugin(option) {
-    return this.each(function () {
-      var $this = $(this)
-      var data  = $this.data('bs.dropdown')
-
-      if (!data) $this.data('bs.dropdown', (data = new Dropdown(this)))
-      if (typeof option == 'string') data[option].call($this)
-    })
-  }
-
-  var old = $.fn.dropdown
-
-  $.fn.dropdown             = Plugin
-  $.fn.dropdown.Constructor = Dropdown
-
-
-  // DROPDOWN NO CONFLICT
-  // ====================
-
-  $.fn.dropdown.noConflict = function () {
-    $.fn.dropdown = old
-    return this
-  }
-
-
-  // APPLY TO STANDARD DROPDOWN ELEMENTS
-  // ===================================
-
-  $(document)
-    .on('click.bs.dropdown.data-api', clearMenus)
-    .on('click.bs.dropdown.data-api', '.dropdown form', function (e) { e.stopPropagation() })
-    .on('click.bs.dropdown.data-api', toggle, Dropdown.prototype.toggle)
-    .on('keydown.bs.dropdown.data-api', toggle + ', [role="menu"], [role="listbox"]', Dropdown.prototype.keydown)
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: tab.js v3.2.0
- * http://getbootstrap.com/javascript/#tabs
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // TAB CLASS DEFINITION
-  // ====================
-
-  var Tab = function (element) {
-    this.element = $(element)
-  }
-
-  Tab.VERSION = '3.2.0'
-
-  Tab.prototype.show = function () {
-    var $this    = this.element
-    var $ul      = $this.closest('ul:not(.dropdown-menu)')
-    var selector = $this.data('target')
-
-    if (!selector) {
-      selector = $this.attr('href')
-      selector = selector && selector.replace(/.*(?=#[^\s]*$)/, '') // strip for ie7
-    }
-
-    if ($this.parent('li').hasClass('active')) return
-
-    var previous = $ul.find('.active:last a')[0]
-    var e        = $.Event('show.bs.tab', {
-      relatedTarget: previous
-    })
-
-    $this.trigger(e)
-
-    if (e.isDefaultPrevented()) return
-
-    var $target = $(selector)
-
-    this.activate($this.closest('li'), $ul)
-    this.activate($target, $target.parent(), function () {
-      $this.trigger({
-        type: 'shown.bs.tab',
-        relatedTarget: previous
-      })
-    })
-  }
-
-  Tab.prototype.activate = function (element, container, callback) {
-    var $active    = container.find('> .active')
-    var transition = callback
-      && $.support.transition
-      && $active.hasClass('fade')
-
-    function next() {
-      $active
-        .removeClass('active')
-        .find('> .dropdown-menu > .active')
-        .removeClass('active')
-
-      element.addClass('active')
-
-      if (transition) {
-        element[0].offsetWidth // reflow for transition
-        element.addClass('in')
-      } else {
-        element.removeClass('fade')
-      }
-
-      if (element.parent('.dropdown-menu')) {
-        element.closest('li.dropdown').addClass('active')
-      }
-
-      callback && callback()
-    }
-
-    transition ?
-      $active
-        .one('bsTransitionEnd', next)
-        .emulateTransitionEnd(150) :
-      next()
-
-    $active.removeClass('in')
-  }
-
-
-  // TAB PLUGIN DEFINITION
-  // =====================
-
-  function Plugin(option) {
-    return this.each(function () {
-      var $this = $(this)
-      var data  = $this.data('bs.tab')
-
-      if (!data) $this.data('bs.tab', (data = new Tab(this)))
-      if (typeof option == 'string') data[option]()
-    })
-  }
-
-  var old = $.fn.tab
-
-  $.fn.tab             = Plugin
-  $.fn.tab.Constructor = Tab
-
-
-  // TAB NO CONFLICT
-  // ===============
-
-  $.fn.tab.noConflict = function () {
-    $.fn.tab = old
-    return this
-  }
-
-
-  // TAB DATA-API
-  // ============
-
-  $(document).on('click.bs.tab.data-api', '[data-toggle="tab"], [data-toggle="pill"]', function (e) {
-    e.preventDefault()
-    Plugin.call($(this), 'show')
-  })
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: transition.js v3.2.0
- * http://getbootstrap.com/javascript/#transitions
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // CSS TRANSITION SUPPORT (Shoutout: http://www.modernizr.com/)
-  // ============================================================
-
-  function transitionEnd() {
-    var el = document.createElement('bootstrap')
-
-    var transEndEventNames = {
-      WebkitTransition : 'webkitTransitionEnd',
-      MozTransition    : 'transitionend',
-      OTransition      : 'oTransitionEnd otransitionend',
-      transition       : 'transitionend'
-    }
-
-    for (var name in transEndEventNames) {
-      if (el.style[name] !== undefined) {
-        return { end: transEndEventNames[name] }
-      }
-    }
-
-    return false // explicit for ie8 (  ._.)
-  }
-
-  // http://blog.alexmaccaw.com/css-transitions
-  $.fn.emulateTransitionEnd = function (duration) {
-    var called = false
-    var $el = this
-    $(this).one('bsTransitionEnd', function () { called = true })
-    var callback = function () { if (!called) $($el).trigger($.support.transition.end) }
-    setTimeout(callback, duration)
-    return this
-  }
-
-  $(function () {
-    $.support.transition = transitionEnd()
-
-    if (!$.support.transition) return
-
-    $.event.special.bsTransitionEnd = {
-      bindType: $.support.transition.end,
-      delegateType: $.support.transition.end,
-      handle: function (e) {
-        if ($(e.target).is(this)) return e.handleObj.handler.apply(this, arguments)
-      }
-    }
-  })
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: scrollspy.js v3.2.0
- * http://getbootstrap.com/javascript/#scrollspy
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // SCROLLSPY CLASS DEFINITION
-  // ==========================
-
-  function ScrollSpy(element, options) {
-    var process  = $.proxy(this.process, this)
-
-    this.$body          = $('body')
-    this.$scrollElement = $(element).is('body') ? $(window) : $(element)
-    this.options        = $.extend({}, ScrollSpy.DEFAULTS, options)
-    this.selector       = (this.options.target || '') + ' .nav li > a'
-    this.offsets        = []
-    this.targets        = []
-    this.activeTarget   = null
-    this.scrollHeight   = 0
-
-    this.$scrollElement.on('scroll.bs.scrollspy', process)
-    this.refresh()
-    this.process()
-  }
-
-  ScrollSpy.VERSION  = '3.2.0'
-
-  ScrollSpy.DEFAULTS = {
-    offset: 10
-  }
-
-  ScrollSpy.prototype.getScrollHeight = function () {
-    return this.$scrollElement[0].scrollHeight || Math.max(this.$body[0].scrollHeight, document.documentElement.scrollHeight)
-  }
-
-  ScrollSpy.prototype.refresh = function () {
-    var offsetMethod = 'offset'
-    var offsetBase   = 0
-
-    if (!$.isWindow(this.$scrollElement[0])) {
-      offsetMethod = 'position'
-      offsetBase   = this.$scrollElement.scrollTop()
-    }
-
-    this.offsets = []
-    this.targets = []
-    this.scrollHeight = this.getScrollHeight()
-
-    var self     = this
-
-    this.$body
-      .find(this.selector)
-      .map(function () {
-        var $el   = $(this)
-        var href  = $el.data('target') || $el.attr('href')
-        var $href = /^#./.test(href) && $(href)
-
-        return ($href
-          && $href.length
-          && $href.is(':visible')
-          && [[$href[offsetMethod]().top + offsetBase, href]]) || null
-      })
-      .sort(function (a, b) { return a[0] - b[0] })
-      .each(function () {
-        self.offsets.push(this[0])
-        self.targets.push(this[1])
-      })
-  }
-
-  ScrollSpy.prototype.process = function () {
-    var scrollTop    = this.$scrollElement.scrollTop() + this.options.offset
-    var scrollHeight = this.getScrollHeight()
-    var maxScroll    = this.options.offset + scrollHeight - this.$scrollElement.height()
-    var offsets      = this.offsets
-    var targets      = this.targets
-    var activeTarget = this.activeTarget
-    var i
-
-    if (this.scrollHeight != scrollHeight) {
-      this.refresh()
-    }
-
-    if (scrollTop >= maxScroll) {
-      return activeTarget != (i = targets[targets.length - 1]) && this.activate(i)
-    }
-
-    if (activeTarget && scrollTop <= offsets[0]) {
-      return activeTarget != (i = targets[0]) && this.activate(i)
-    }
-
-    for (i = offsets.length; i--;) {
-      activeTarget != targets[i]
-        && scrollTop >= offsets[i]
-        && (!offsets[i + 1] || scrollTop <= offsets[i + 1])
-        && this.activate(targets[i])
-    }
-  }
-
-  ScrollSpy.prototype.activate = function (target) {
-    this.activeTarget = target
-
-    $(this.selector)
-      .parentsUntil(this.options.target, '.active')
-      .removeClass('active')
-
-    var selector = this.selector +
-        '[data-target="' + target + '"],' +
-        this.selector + '[href="' + target + '"]'
-
-    var active = $(selector)
-      .parents('li')
-      .addClass('active')
-
-    if (active.parent('.dropdown-menu').length) {
-      active = active
-        .closest('li.dropdown')
-        .addClass('active')
-    }
-
-    active.trigger('activate.bs.scrollspy')
-  }
-
-
-  // SCROLLSPY PLUGIN DEFINITION
-  // ===========================
-
-  function Plugin(option) {
-    return this.each(function () {
-      var $this   = $(this)
-      var data    = $this.data('bs.scrollspy')
-      var options = typeof option == 'object' && option
-
-      if (!data) $this.data('bs.scrollspy', (data = new ScrollSpy(this, options)))
-      if (typeof option == 'string') data[option]()
-    })
-  }
-
-  var old = $.fn.scrollspy
-
-  $.fn.scrollspy             = Plugin
-  $.fn.scrollspy.Constructor = ScrollSpy
-
-
-  // SCROLLSPY NO CONFLICT
-  // =====================
-
-  $.fn.scrollspy.noConflict = function () {
-    $.fn.scrollspy = old
-    return this
-  }
-
-
-  // SCROLLSPY DATA-API
-  // ==================
-
-  $(window).on('load.bs.scrollspy.data-api', function () {
-    $('[data-spy="scroll"]').each(function () {
-      var $spy = $(this)
-      Plugin.call($spy, $spy.data())
-    })
-  })
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: modal.js v3.2.0
- * http://getbootstrap.com/javascript/#modals
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // MODAL CLASS DEFINITION
-  // ======================
-
-  var Modal = function (element, options) {
-    this.options        = options
-    this.$body          = $(document.body)
-    this.$element       = $(element)
-    this.$backdrop      =
-    this.isShown        = null
-    this.scrollbarWidth = 0
-
-    if (this.options.remote) {
-      this.$element
-        .find('.modal-content')
-        .load(this.options.remote, $.proxy(function () {
-          this.$element.trigger('loaded.bs.modal')
-        }, this))
-    }
-  }
-
-  Modal.VERSION  = '3.2.0'
-
-  Modal.DEFAULTS = {
-    backdrop: true,
-    keyboard: true,
-    show: true
-  }
-
-  Modal.prototype.toggle = function (_relatedTarget) {
-    return this.isShown ? this.hide() : this.show(_relatedTarget)
-  }
-
-  Modal.prototype.show = function (_relatedTarget) {
-    var that = this
-    var e    = $.Event('show.bs.modal', { relatedTarget: _relatedTarget })
-
-    this.$element.trigger(e)
-
-    if (this.isShown || e.isDefaultPrevented()) return
-
-    this.isShown = true
-
-    this.checkScrollbar()
-    this.$body.addClass('modal-open')
-
-    this.setScrollbar()
-    this.escape()
-
-    this.$element.on('click.dismiss.bs.modal', '[data-dismiss="modal"]', $.proxy(this.hide, this))
-
-    this.backdrop(function () {
-      var transition = $.support.transition && that.$element.hasClass('fade')
-
-      if (!that.$element.parent().length) {
-        that.$element.appendTo(that.$body) // don't move modals dom position
-      }
-
-      that.$element
-        .show()
-        .scrollTop(0)
-
-      if (transition) {
-        that.$element[0].offsetWidth // force reflow
-      }
-
-      that.$element
-        .addClass('in')
-        .attr('aria-hidden', false)
-
-      that.enforceFocus()
-
-      var e = $.Event('shown.bs.modal', { relatedTarget: _relatedTarget })
-
-      transition ?
-        that.$element.find('.modal-dialog') // wait for modal to slide in
-          .one('bsTransitionEnd', function () {
-            that.$element.trigger('focus').trigger(e)
-          })
-          .emulateTransitionEnd(300) :
-        that.$element.trigger('focus').trigger(e)
-    })
-  }
-
-  Modal.prototype.hide = function (e) {
-    if (e) e.preventDefault()
-
-    e = $.Event('hide.bs.modal')
-
-    this.$element.trigger(e)
-
-    if (!this.isShown || e.isDefaultPrevented()) return
-
-    this.isShown = false
-
-    this.$body.removeClass('modal-open')
-
-    this.resetScrollbar()
-    this.escape()
-
-    $(document).off('focusin.bs.modal')
-
-    this.$element
-      .removeClass('in')
-      .attr('aria-hidden', true)
-      .off('click.dismiss.bs.modal')
-
-    $.support.transition && this.$element.hasClass('fade') ?
-      this.$element
-        .one('bsTransitionEnd', $.proxy(this.hideModal, this))
-        .emulateTransitionEnd(300) :
-      this.hideModal()
-  }
-
-  Modal.prototype.enforceFocus = function () {
-    $(document)
-      .off('focusin.bs.modal') // guard against infinite focus loop
-      .on('focusin.bs.modal', $.proxy(function (e) {
-        if (this.$element[0] !== e.target && !this.$element.has(e.target).length) {
-          this.$element.trigger('focus')
-        }
-      }, this))
-  }
-
-  Modal.prototype.escape = function () {
-    if (this.isShown && this.options.keyboard) {
-      this.$element.on('keyup.dismiss.bs.modal', $.proxy(function (e) {
-        e.which == 27 && this.hide()
-      }, this))
-    } else if (!this.isShown) {
-      this.$element.off('keyup.dismiss.bs.modal')
-    }
-  }
-
-  Modal.prototype.hideModal = function () {
-    var that = this
-    this.$element.hide()
-    this.backdrop(function () {
-      that.$element.trigger('hidden.bs.modal')
-    })
-  }
-
-  Modal.prototype.removeBackdrop = function () {
-    this.$backdrop && this.$backdrop.remove()
-    this.$backdrop = null
-  }
-
-  Modal.prototype.backdrop = function (callback) {
-    var that = this
-    var animate = this.$element.hasClass('fade') ? 'fade' : ''
-
-    if (this.isShown && this.options.backdrop) {
-      var doAnimate = $.support.transition && animate
-
-      this.$backdrop = $('<div class="modal-backdrop ' + animate + '" />')
-        .appendTo(this.$body)
-
-      this.$element.on('click.dismiss.bs.modal', $.proxy(function (e) {
-        if (e.target !== e.currentTarget) return
-        this.options.backdrop == 'static'
-          ? this.$element[0].focus.call(this.$element[0])
-          : this.hide.call(this)
-      }, this))
-
-      if (doAnimate) this.$backdrop[0].offsetWidth // force reflow
-
-      this.$backdrop.addClass('in')
-
-      if (!callback) return
-
-      doAnimate ?
-        this.$backdrop
-          .one('bsTransitionEnd', callback)
-          .emulateTransitionEnd(150) :
-        callback()
-
-    } else if (!this.isShown && this.$backdrop) {
-      this.$backdrop.removeClass('in')
-
-      var callbackRemove = function () {
-        that.removeBackdrop()
-        callback && callback()
-      }
-      $.support.transition && this.$element.hasClass('fade') ?
-        this.$backdrop
-          .one('bsTransitionEnd', callbackRemove)
-          .emulateTransitionEnd(150) :
-        callbackRemove()
-
-    } else if (callback) {
-      callback()
-    }
-  }
-
-  Modal.prototype.checkScrollbar = function () {
-    if (document.body.clientWidth >= window.innerWidth) return
-    this.scrollbarWidth = this.scrollbarWidth || this.measureScrollbar()
-  }
-
-  Modal.prototype.setScrollbar = function () {
-    var bodyPad = parseInt((this.$body.css('padding-right') || 0), 10)
-    if (this.scrollbarWidth) this.$body.css('padding-right', bodyPad + this.scrollbarWidth)
-  }
-
-  Modal.prototype.resetScrollbar = function () {
-    this.$body.css('padding-right', '')
-  }
-
-  Modal.prototype.measureScrollbar = function () { // thx walsh
-    var scrollDiv = document.createElement('div')
-    scrollDiv.className = 'modal-scrollbar-measure'
-    this.$body.append(scrollDiv)
-    var scrollbarWidth = scrollDiv.offsetWidth - scrollDiv.clientWidth
-    this.$body[0].removeChild(scrollDiv)
-    return scrollbarWidth
-  }
-
-
-  // MODAL PLUGIN DEFINITION
-  // =======================
-
-  function Plugin(option, _relatedTarget) {
-    return this.each(function () {
-      var $this   = $(this)
-      var data    = $this.data('bs.modal')
-      var options = $.extend({}, Modal.DEFAULTS, $this.data(), typeof option == 'object' && option)
-
-      if (!data) $this.data('bs.modal', (data = new Modal(this, options)))
-      if (typeof option == 'string') data[option](_relatedTarget)
-      else if (options.show) data.show(_relatedTarget)
-    })
-  }
-
-  var old = $.fn.modal
-
-  $.fn.modal             = Plugin
-  $.fn.modal.Constructor = Modal
-
-
-  // MODAL NO CONFLICT
-  // =================
-
-  $.fn.modal.noConflict = function () {
-    $.fn.modal = old
-    return this
-  }
-
-
-  // MODAL DATA-API
-  // ==============
-
-  $(document).on('click.bs.modal.data-api', '[data-toggle="modal"]', function (e) {
-    var $this   = $(this)
-    var href    = $this.attr('href')
-    var $target = $($this.attr('data-target') || (href && href.replace(/.*(?=#[^\s]+$)/, ''))) // strip for ie7
-    var option  = $target.data('bs.modal') ? 'toggle' : $.extend({ remote: !/#/.test(href) && href }, $target.data(), $this.data())
-
-    if ($this.is('a')) e.preventDefault()
-
-    $target.one('show.bs.modal', function (showEvent) {
-      if (showEvent.isDefaultPrevented()) return // only register focus restorer if modal will actually get shown
-      $target.one('hidden.bs.modal', function () {
-        $this.is(':visible') && $this.trigger('focus')
-      })
-    })
-    Plugin.call($target, option, this)
-  })
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: tooltip.js v3.2.0
- * http://getbootstrap.com/javascript/#tooltip
- * Inspired by the original jQuery.tipsy by Jason Frame
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // TOOLTIP PUBLIC CLASS DEFINITION
-  // ===============================
-
-  var Tooltip = function (element, options) {
-    this.type       =
-    this.options    =
-    this.enabled    =
-    this.timeout    =
-    this.hoverState =
-    this.$element   = null
-
-    this.init('tooltip', element, options)
-  }
-
-  Tooltip.VERSION  = '3.2.0'
-
-  Tooltip.DEFAULTS = {
-    animation: true,
-    placement: 'top',
-    selector: false,
-    template: '<div class="tooltip" role="tooltip"><div class="tooltip-arrow"></div><div class="tooltip-inner"></div></div>',
-    trigger: 'hover focus',
-    title: '',
-    delay: 0,
-    html: false,
-    container: false,
-    viewport: {
-      selector: 'body',
-      padding: 0
-    }
-  }
-
-  Tooltip.prototype.init = function (type, element, options) {
-    this.enabled   = true
-    this.type      = type
-    this.$element  = $(element)
-    this.options   = this.getOptions(options)
-    this.$viewport = this.options.viewport && $(this.options.viewport.selector || this.options.viewport)
-
-    var triggers = this.options.trigger.split(' ')
-
-    for (var i = triggers.length; i--;) {
-      var trigger = triggers[i]
-
-      if (trigger == 'click') {
-        this.$element.on('click.' + this.type, this.options.selector, $.proxy(this.toggle, this))
-      } else if (trigger != 'manual') {
-        var eventIn  = trigger == 'hover' ? 'mouseenter' : 'focusin'
-        var eventOut = trigger == 'hover' ? 'mouseleave' : 'focusout'
-
-        this.$element.on(eventIn  + '.' + this.type, this.options.selector, $.proxy(this.enter, this))
-        this.$element.on(eventOut + '.' + this.type, this.options.selector, $.proxy(this.leave, this))
-      }
-    }
-
-    this.options.selector ?
-      (this._options = $.extend({}, this.options, { trigger: 'manual', selector: '' })) :
-      this.fixTitle()
-  }
-
-  Tooltip.prototype.getDefaults = function () {
-    return Tooltip.DEFAULTS
-  }
-
-  Tooltip.prototype.getOptions = function (options) {
-    options = $.extend({}, this.getDefaults(), this.$element.data(), options)
-
-    if (options.delay && typeof options.delay == 'number') {
-      options.delay = {
-        show: options.delay,
-        hide: options.delay
-      }
-    }
-
-    return options
-  }
-
-  Tooltip.prototype.getDelegateOptions = function () {
-    var options  = {}
-    var defaults = this.getDefaults()
-
-    this._options && $.each(this._options, function (key, value) {
-      if (defaults[key] != value) options[key] = value
-    })
-
-    return options
-  }
-
-  Tooltip.prototype.enter = function (obj) {
-    var self = obj instanceof this.constructor ?
-      obj : $(obj.currentTarget).data('bs.' + this.type)
-
-    if (!self) {
-      self = new this.constructor(obj.currentTarget, this.getDelegateOptions())
-      $(obj.currentTarget).data('bs.' + this.type, self)
-    }
-
-    clearTimeout(self.timeout)
-
-    self.hoverState = 'in'
-
-    if (!self.options.delay || !self.options.delay.show) return self.show()
-
-    self.timeout = setTimeout(function () {
-      if (self.hoverState == 'in') self.show()
-    }, self.options.delay.show)
-  }
-
-  Tooltip.prototype.leave = function (obj) {
-    var self = obj instanceof this.constructor ?
-      obj : $(obj.currentTarget).data('bs.' + this.type)
-
-    if (!self) {
-      self = new this.constructor(obj.currentTarget, this.getDelegateOptions())
-      $(obj.currentTarget).data('bs.' + this.type, self)
-    }
-
-    clearTimeout(self.timeout)
-
-    self.hoverState = 'out'
-
-    if (!self.options.delay || !self.options.delay.hide) return self.hide()
-
-    self.timeout = setTimeout(function () {
-      if (self.hoverState == 'out') self.hide()
-    }, self.options.delay.hide)
-  }
-
-  Tooltip.prototype.show = function () {
-    var e = $.Event('show.bs.' + this.type)
-
-    if (this.hasContent() && this.enabled) {
-      this.$element.trigger(e)
-
-      var inDom = $.contains(document.documentElement, this.$element[0])
-      if (e.isDefaultPrevented() || !inDom) return
-      var that = this
-
-      var $tip = this.tip()
-
-      var tipId = this.getUID(this.type)
-
-      this.setContent()
-      $tip.attr('id', tipId)
-      this.$element.attr('aria-describedby', tipId)
-
-      if (this.options.animation) $tip.addClass('fade')
-
-      var placement = typeof this.options.placement == 'function' ?
-        this.options.placement.call(this, $tip[0], this.$element[0]) :
-        this.options.placement
-
-      var autoToken = /\s?auto?\s?/i
-      var autoPlace = autoToken.test(placement)
-      if (autoPlace) placement = placement.replace(autoToken, '') || 'top'
-
-      $tip
-        .detach()
-        .css({ top: 0, left: 0, display: 'block' })
-        .addClass(placement)
-        .data('bs.' + this.type, this)
-
-      this.options.container ? $tip.appendTo(this.options.container) : $tip.insertAfter(this.$element)
-
-      var pos          = this.getPosition()
-      var actualWidth  = $tip[0].offsetWidth
-      var actualHeight = $tip[0].offsetHeight
-
-      if (autoPlace) {
-        var orgPlacement = placement
-        var $parent      = this.$element.parent()
-        var parentDim    = this.getPosition($parent)
-
-        placement = placement == 'bottom' && pos.top   + pos.height       + actualHeight - parentDim.scroll > parentDim.height ? 'top'    :
-                    placement == 'top'    && pos.top   - parentDim.scroll - actualHeight < 0                                   ? 'bottom' :
-                    placement == 'right'  && pos.right + actualWidth      > parentDim.width                                    ? 'left'   :
-                    placement == 'left'   && pos.left  - actualWidth      < parentDim.left                                     ? 'right'  :
-                    placement
-
-        $tip
-          .removeClass(orgPlacement)
-          .addClass(placement)
-      }
-
-      var calculatedOffset = this.getCalculatedOffset(placement, pos, actualWidth, actualHeight)
-
-      this.applyPlacement(calculatedOffset, placement)
-
-      var complete = function () {
-        that.$element.trigger('shown.bs.' + that.type)
-        that.hoverState = null
-      }
-
-      $.support.transition && this.$tip.hasClass('fade') ?
-        $tip
-          .one('bsTransitionEnd', complete)
-          .emulateTransitionEnd(150) :
-        complete()
-    }
-  }
-
-  Tooltip.prototype.applyPlacement = function (offset, placement) {
-    var $tip   = this.tip()
-    var width  = $tip[0].offsetWidth
-    var height = $tip[0].offsetHeight
-
-    // manually read margins because getBoundingClientRect includes difference
-    var marginTop = parseInt($tip.css('margin-top'), 10)
-    var marginLeft = parseInt($tip.css('margin-left'), 10)
-
-    // we must check for NaN for ie 8/9
-    if (isNaN(marginTop))  marginTop  = 0
-    if (isNaN(marginLeft)) marginLeft = 0
-
-    offset.top  = offset.top  + marginTop
-    offset.left = offset.left + marginLeft
-
-    // $.fn.offset doesn't round pixel values
-    // so we use setOffset directly with our own function B-0
-    $.offset.setOffset($tip[0], $.extend({
-      using: function (props) {
-        $tip.css({
-          top: Math.round(props.top),
-          left: Math.round(props.left)
-        })
-      }
-    }, offset), 0)
-
-    $tip.addClass('in')
-
-    // check to see if placing tip in new offset caused the tip to resize itself
-    var actualWidth  = $tip[0].offsetWidth
-    var actualHeight = $tip[0].offsetHeight
-
-    if (placement == 'top' && actualHeight != height) {
-      offset.top = offset.top + height - actualHeight
-    }
-
-    var delta = this.getViewportAdjustedDelta(placement, offset, actualWidth, actualHeight)
-
-    if (delta.left) offset.left += delta.left
-    else offset.top += delta.top
-
-    var arrowDelta          = delta.left ? delta.left * 2 - width + actualWidth : delta.top * 2 - height + actualHeight
-    var arrowPosition       = delta.left ? 'left'        : 'top'
-    var arrowOffsetPosition = delta.left ? 'offsetWidth' : 'offsetHeight'
-
-    $tip.offset(offset)
-    this.replaceArrow(arrowDelta, $tip[0][arrowOffsetPosition], arrowPosition)
-  }
-
-  Tooltip.prototype.replaceArrow = function (delta, dimension, position) {
-    this.arrow().css(position, delta ? (50 * (1 - delta / dimension) + '%') : '')
-  }
-
-  Tooltip.prototype.setContent = function () {
-    var $tip  = this.tip()
-    var title = this.getTitle()
-
-    $tip.find('.tooltip-inner')[this.options.html ? 'html' : 'text'](title)
-    $tip.removeClass('fade in top bottom left right')
-  }
-
-  Tooltip.prototype.hide = function () {
-    var that = this
-    var $tip = this.tip()
-    var e    = $.Event('hide.bs.' + this.type)
-
-    this.$element.removeAttr('aria-describedby')
-
-    function complete() {
-      if (that.hoverState != 'in') $tip.detach()
-      that.$element.trigger('hidden.bs.' + that.type)
-    }
-
-    this.$element.trigger(e)
-
-    if (e.isDefaultPrevented()) return
-
-    $tip.removeClass('in')
-
-    $.support.transition && this.$tip.hasClass('fade') ?
-      $tip
-        .one('bsTransitionEnd', complete)
-        .emulateTransitionEnd(150) :
-      complete()
-
-    this.hoverState = null
-
-    return this
-  }
-
-  Tooltip.prototype.fixTitle = function () {
-    var $e = this.$element
-    if ($e.attr('title') || typeof ($e.attr('data-original-title')) != 'string') {
-      $e.attr('data-original-title', $e.attr('title') || '').attr('title', '')
-    }
-  }
-
-  Tooltip.prototype.hasContent = function () {
-    return this.getTitle()
-  }
-
-  Tooltip.prototype.getPosition = function ($element) {
-    $element   = $element || this.$element
-    var el     = $element[0]
-    var isBody = el.tagName == 'BODY'
-    return $.extend({}, (typeof el.getBoundingClientRect == 'function') ? el.getBoundingClientRect() : null, {
-      scroll: isBody ? document.documentElement.scrollTop || document.body.scrollTop : $element.scrollTop(),
-      width:  isBody ? $(window).width()  : $element.outerWidth(),
-      height: isBody ? $(window).height() : $element.outerHeight()
-    }, isBody ? { top: 0, left: 0 } : $element.offset())
-  }
-
-  Tooltip.prototype.getCalculatedOffset = function (placement, pos, actualWidth, actualHeight) {
-    return placement == 'bottom' ? { top: pos.top + pos.height,   left: pos.left + pos.width / 2 - actualWidth / 2  } :
-           placement == 'top'    ? { top: pos.top - actualHeight, left: pos.left + pos.width / 2 - actualWidth / 2  } :
-           placement == 'left'   ? { top: pos.top + pos.height / 2 - actualHeight / 2, left: pos.left - actualWidth } :
-        /* placement == 'right' */ { top: pos.top + pos.height / 2 - actualHeight / 2, left: pos.left + pos.width   }
-
-  }
-
-  Tooltip.prototype.getViewportAdjustedDelta = function (placement, pos, actualWidth, actualHeight) {
-    var delta = { top: 0, left: 0 }
-    if (!this.$viewport) return delta
-
-    var viewportPadding = this.options.viewport && this.options.viewport.padding || 0
-    var viewportDimensions = this.getPosition(this.$viewport)
-
-    if (/right|left/.test(placement)) {
-      var topEdgeOffset    = pos.top - viewportPadding - viewportDimensions.scroll
-      var bottomEdgeOffset = pos.top + viewportPadding - viewportDimensions.scroll + actualHeight
-      if (topEdgeOffset < viewportDimensions.top) { // top overflow
-        delta.top = viewportDimensions.top - topEdgeOffset
-      } else if (bottomEdgeOffset > viewportDimensions.top + viewportDimensions.height) { // bottom overflow
-        delta.top = viewportDimensions.top + viewportDimensions.height - bottomEdgeOffset
-      }
-    } else {
-      var leftEdgeOffset  = pos.left - viewportPadding
-      var rightEdgeOffset = pos.left + viewportPadding + actualWidth
-      if (leftEdgeOffset < viewportDimensions.left) { // left overflow
-        delta.left = viewportDimensions.left - leftEdgeOffset
-      } else if (rightEdgeOffset > viewportDimensions.width) { // right overflow
-        delta.left = viewportDimensions.left + viewportDimensions.width - rightEdgeOffset
-      }
-    }
-
-    return delta
-  }
-
-  Tooltip.prototype.getTitle = function () {
-    var title
-    var $e = this.$element
-    var o  = this.options
-
-    title = $e.attr('data-original-title')
-      || (typeof o.title == 'function' ? o.title.call($e[0]) :  o.title)
-
-    return title
-  }
-
-  Tooltip.prototype.getUID = function (prefix) {
-    do prefix += ~~(Math.random() * 1000000)
-    while (document.getElementById(prefix))
-    return prefix
-  }
-
-  Tooltip.prototype.tip = function () {
-    return (this.$tip = this.$tip || $(this.options.template))
-  }
-
-  Tooltip.prototype.arrow = function () {
-    return (this.$arrow = this.$arrow || this.tip().find('.tooltip-arrow'))
-  }
-
-  Tooltip.prototype.validate = function () {
-    if (!this.$element[0].parentNode) {
-      this.hide()
-      this.$element = null
-      this.options  = null
-    }
-  }
-
-  Tooltip.prototype.enable = function () {
-    this.enabled = true
-  }
-
-  Tooltip.prototype.disable = function () {
-    this.enabled = false
-  }
-
-  Tooltip.prototype.toggleEnabled = function () {
-    this.enabled = !this.enabled
-  }
-
-  Tooltip.prototype.toggle = function (e) {
-    var self = this
-    if (e) {
-      self = $(e.currentTarget).data('bs.' + this.type)
-      if (!self) {
-        self = new this.constructor(e.currentTarget, this.getDelegateOptions())
-        $(e.currentTarget).data('bs.' + this.type, self)
-      }
-    }
-
-    self.tip().hasClass('in') ? self.leave(self) : self.enter(self)
-  }
-
-  Tooltip.prototype.destroy = function () {
-    clearTimeout(this.timeout)
-    this.hide().$element.off('.' + this.type).removeData('bs.' + this.type)
-  }
-
-
-  // TOOLTIP PLUGIN DEFINITION
-  // =========================
-
-  function Plugin(option) {
-    return this.each(function () {
-      var $this   = $(this)
-      var data    = $this.data('bs.tooltip')
-      var options = typeof option == 'object' && option
-
-      if (!data && option == 'destroy') return
-      if (!data) $this.data('bs.tooltip', (data = new Tooltip(this, options)))
-      if (typeof option == 'string') data[option]()
-    })
-  }
-
-  var old = $.fn.tooltip
-
-  $.fn.tooltip             = Plugin
-  $.fn.tooltip.Constructor = Tooltip
-
-
-  // TOOLTIP NO CONFLICT
-  // ===================
-
-  $.fn.tooltip.noConflict = function () {
-    $.fn.tooltip = old
-    return this
-  }
-
-}(jQuery);
-
-/* ========================================================================
- * Bootstrap: popover.js v3.2.0
- * http://getbootstrap.com/javascript/#popovers
- * ========================================================================
- * Copyright 2011-2014 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
-
-
-+function ($) {
-  'use strict';
-
-  // POPOVER PUBLIC CLASS DEFINITION
-  // ===============================
-
-  var Popover = function (element, options) {
-    this.init('popover', element, options)
-  }
-
-  if (!$.fn.tooltip) throw new Error('Popover requires tooltip.js')
-
-  Popover.VERSION  = '3.2.0'
-
-  Popover.DEFAULTS = $.extend({}, $.fn.tooltip.Constructor.DEFAULTS, {
-    placement: 'right',
-    trigger: 'click',
-    content: '',
-    template: '<div class="popover" role="tooltip"><div class="arrow"></div><h3 class="popover-title"></h3><div class="popover-content"></div></div>'
-  })
-
-
-  // NOTE: POPOVER EXTENDS tooltip.js
-  // ================================
-
-  Popover.prototype = $.extend({}, $.fn.tooltip.Constructor.prototype)
-
-  Popover.prototype.constructor = Popover
-
-  Popover.prototype.getDefaults = function () {
-    return Popover.DEFAULTS
-  }
-
-  Popover.prototype.setContent = function () {
-    var $tip    = this.tip()
-    var title   = this.getTitle()
-    var content = this.getContent()
-
-    $tip.find('.popover-title')[this.options.html ? 'html' : 'text'](title)
-    $tip.find('.popover-content').empty()[ // we use append for html objects to maintain js events
-      this.options.html ? (typeof content == 'string' ? 'html' : 'append') : 'text'
-    ](content)
-
-    $tip.removeClass('fade top bottom left right in')
-
-    // IE8 doesn't accept hiding via the `:empty` pseudo selector, we have to do
-    // this manually by checking the contents.
-    if (!$tip.find('.popover-title').html()) $tip.find('.popover-title').hide()
-  }
-
-  Popover.prototype.hasContent = function () {
-    return this.getTitle() || this.getContent()
-  }
-
-  Popover.prototype.getContent = function () {
-    var $e = this.$element
-    var o  = this.options
-
-    return $e.attr('data-content')
-      || (typeof o.content == 'function' ?
-            o.content.call($e[0]) :
-            o.content)
-  }
-
-  Popover.prototype.arrow = function () {
-    return (this.$arrow = this.$arrow || this.tip().find('.arrow'))
-  }
-
-  Popover.prototype.tip = function () {
-    if (!this.$tip) this.$tip = $(this.options.template)
-    return this.$tip
-  }
-
-
-  // POPOVER PLUGIN DEFINITION
-  // =========================
-
-  function Plugin(option) {
-    return this.each(function () {
-      var $this   = $(this)
-      var data    = $this.data('bs.popover')
-      var options = typeof option == 'object' && option
-
-      if (!data && option == 'destroy') return
-      if (!data) $this.data('bs.popover', (data = new Popover(this, options)))
-      if (typeof option == 'string') data[option]()
-    })
-  }
-
-  var old = $.fn.popover
-
-  $.fn.popover             = Plugin
-  $.fn.popover.Constructor = Popover
-
-
-  // POPOVER NO CONFLICT
-  // ===================
-
-  $.fn.popover.noConflict = function () {
-    $.fn.popover = old
-    return this
-  }
-
-}(jQuery);
-
-
 ;define("ember-qunit/isolated-container",
   ["./test-resolver","ember","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
