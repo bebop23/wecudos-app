@@ -5,8 +5,10 @@ This README outlines the details of collaborating on this Ember application.
 ## Installation
 
 * `git clone` this repository
-* `npm install`
-* `bower install`
+* `cd wecudos-app`
+* `sudo npm install -g ember-cli` (if not already installed) 
+* `npm install && bower install`
+
 
 ## Running
 
